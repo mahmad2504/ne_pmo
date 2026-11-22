@@ -1,0 +1,30 @@
+{
+  "keycloakUrl": "http://localhost:8082",
+  "realm": "logic-silicon",
+  "frontendClientId": "react-app",
+  "backendAudience": "backend-api",
+  "frontendUrl": "http://localhost:5174",
+  "additionalFrontendUrls": [
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5173"
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "password": "alice123",
+      "firstName": "Alice",
+      "lastName": "User",
+      "email": "alice@example.com",
+      "roles": ["user"]
+    },
+    {
+      "username": "bob",
+      "password": "bob123",
+      "firstName": "Bob",
+      "lastName": "Admin",
+      "email": "bob@example.com",
+      "roles": ["user", "admin"]
+    }
+  ]
+}

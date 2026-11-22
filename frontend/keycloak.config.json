@@ -1,0 +1,19 @@
+{
+  "keycloakUrl": "http://localhost:8082",
+  "realm": "logic-silicon",
+  "clientId": "react-app",
+  "frontendUrl": "http://localhost:5174",
+  "backendPort": 8001,
+  "users": [
+    {
+      "username": "alice",
+      "password": "alice123",
+      "roles": ["user"]
+    },
+    {
+      "username": "bob",
+      "password": "bob123",
+      "roles": ["user", "admin"]
+    }
+  ]
+}

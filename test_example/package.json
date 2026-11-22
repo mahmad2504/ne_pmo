@@ -1,0 +1,7 @@
+{
+  "name": "ne-pm-keycloak-setup",
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup-keycloak.mjs"
+  }
+}

@@ -1,0 +1,1 @@
+LOCATIONS = ("KHI", "ISB", "LHR")

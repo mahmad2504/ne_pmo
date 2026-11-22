@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn>=0.32
+sqlalchemy>=2.0.36
+psycopg[binary]>=3.2
+pydantic[email]>=2.10
+python-multipart>=0.0.12
+PyJWT[crypto]>=2.10
