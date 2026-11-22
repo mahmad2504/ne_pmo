@@ -34,3 +34,10 @@ class Lifecycle(str, Enum):
     in_progress = "in_progress"
     closing = "closing"
     completed = "completed"
+
+
+class ReportFlag(str, Enum):
+    risk = "risk"
+    issue = "issue"
+    blocker = "blocker"
+    decision = "decision"

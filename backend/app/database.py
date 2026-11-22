@@ -119,8 +119,58 @@ def _ensure_company_icon() -> None:
         connection.execute(text("ALTER TABLE companies ADD COLUMN icon TEXT"))
 
 
+def _column_names(table: str) -> set[str] | None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(get_engine())
+    if table not in inspector.get_table_names():
+        return None
+    return {column["name"] for column in inspector.get_columns(table)}
+
+
+def _ensure_project_workspace() -> None:
+    from sqlalchemy import text
+
+    engine = get_engine()
+    boolean = (
+        "BOOLEAN NOT NULL DEFAULT false"
+        if engine.dialect.name == "postgresql"
+        else "BOOLEAN NOT NULL DEFAULT 0"
+    )
+    timestamp = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME"
+    statements: list[str] = []
+    projects = _column_names("projects")
+    if projects is not None:
+        if "archived" not in projects:
+            statements.append(f"ALTER TABLE projects ADD COLUMN archived {boolean}")
+        if "reports_with_pmo" not in projects:
+            statements.append(f"ALTER TABLE projects ADD COLUMN reports_with_pmo {boolean}")
+        if "report_cadence_days" not in projects:
+            statements.append("ALTER TABLE projects ADD COLUMN report_cadence_days INTEGER")
+    assignments = _column_names("project_resources")
+    if assignments is not None:
+        if "utilization_percent" not in assignments:
+            statements.append(
+                "ALTER TABLE project_resources ADD COLUMN utilization_percent INTEGER NOT NULL DEFAULT 100"
+            )
+        if "onboarded" not in assignments:
+            statements.append(f"ALTER TABLE project_resources ADD COLUMN onboarded {boolean}")
+        if "started_at" not in assignments:
+            statements.append(f"ALTER TABLE project_resources ADD COLUMN started_at {timestamp}")
+    if not statements and assignments is None:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        if assignments is not None:
+            connection.execute(
+                text("UPDATE project_resources SET started_at = CURRENT_TIMESTAMP WHERE started_at IS NULL")
+            )
+
+
 def init_db() -> None:
     ensure_postgres_database()
     Base.metadata.create_all(get_engine())
     _ensure_company_icon()
+    _ensure_project_workspace()
     _seed_companies()

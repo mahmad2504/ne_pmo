@@ -6,8 +6,9 @@ from pydantic.functional_serializers import PlainSerializer
 
 from app.clock import iso
 from app.locations import LOCATIONS
-from app.normalize import blank_to_none, normalize_location
-from app.roles import Lifecycle, ProjectRole
+from app.normalize import blank_to_none, normalize_location, normalize_tags
+from app.report_html import clean_report_body
+from app.roles import Lifecycle, ProjectRole, ReportFlag
 
 
 def _iso_value(value: datetime | None) -> str | None:
@@ -17,6 +18,7 @@ def _iso_value(value: datetime | None) -> str | None:
 
 
 Utc = Annotated[datetime, PlainSerializer(_iso_value, return_type=str, when_used="json")]
+UtcOpt = Annotated[datetime | None, PlainSerializer(_iso_value, return_type=str | None, when_used="json")]
 
 
 class APIModel(BaseModel):
@@ -315,15 +317,115 @@ class ResourceOut(APIModel):
     updated_at: Utc
 
 
-class ProjectWrite(APIModel):
-    name: str = Field(max_length=255)
+def _clean_id_list(value, *, invalid: str):
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError(invalid)
+    unique: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            raise ValueError(invalid)
+        if isinstance(item, str):
+            text = item.strip()
+            if not text.isdigit():
+                raise ValueError(invalid)
+            item = int(text)
+        if not isinstance(item, int):
+            raise ValueError(invalid)
+        if item not in unique:
+            unique.append(item)
+    return unique
+
+
+class ProjectGroupCreate(NamedCreate):
+    pass
+
+
+class ProjectGroupPatch(NamedPatch):
+    pass
+
+
+class ProjectGroupOut(APIModel):
+    id: int
+    name: str
+    description: str | None
+    position: int
+    project_count: int
+
+
+class ProjectGroupRef(APIModel):
+    id: int
+    name: str
+
+
+class ProjectGroupsWrite(APIModel):
+    group_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("group_ids", mode="before")
+    @classmethod
+    def group_ids_clean(cls, value):
+        cleaned = _clean_id_list([] if value is None else value, invalid="Invalid view")
+        return [] if cleaned is None else cleaned
+
+
+class ProjectGroupMove(APIModel):
+    from_group_id: int
+    to_group_id: int
+
+
+def _clean_symbol(value: str | None, *, required: bool) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Symbol is required")
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Symbol is required")
+    text = " ".join(value.split())
+    if not text:
+        raise ValueError("Symbol is required")
+    if len(text) > 64:
+        raise ValueError("A label can be at most 64 characters")
+    return text
+
+
+def _clean_title(value: str | None, *, required: bool) -> str | None:
+    if value is None:
+        if required:
+            raise ValueError("Title is required")
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Title is required")
+    text = " ".join(value.split())
+    if not text:
+        raise ValueError("Title is required")
+    if len(text) > 255:
+        raise ValueError("Title is too long")
+    return text
+
+
+def _clean_tag_list(value):
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("Labels must be a list")
+    return normalize_tags(value)
+
+
+class TagCreate(APIModel):
+    name: str
+    title: str
     description: str | None = None
-    status: Lifecycle = Lifecycle.assessment
 
     @field_validator("name", mode="before")
     @classmethod
     def name_clean(cls, value):
-        return _clean_name(value, required=True)
+        return _clean_symbol(value, required=True)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def title_clean(cls, value):
+        return _clean_title(value, required=True)
 
     @field_validator("description", mode="before")
     @classmethod
@@ -331,17 +433,24 @@ class ProjectWrite(APIModel):
         return blank_to_none(value)
 
 
-class ProjectPatch(APIModel):
-    name: str | None = Field(default=None, max_length=255)
+class TagPatch(APIModel):
+    name: str | None = None
+    title: str | None = None
     description: str | None = None
-    status: Lifecycle | None = None
 
     @field_validator("name", mode="before")
     @classmethod
     def name_clean(cls, value):
         if value is None:
             return None
-        return _clean_name(value, required=True)
+        return _clean_symbol(value, required=True)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def title_clean(cls, value):
+        if value is None:
+            return None
+        return _clean_title(value, required=True)
 
     @field_validator("description", mode="before")
     @classmethod
@@ -351,21 +460,146 @@ class ProjectPatch(APIModel):
         return blank_to_none(value)
 
     @model_validator(mode="after")
+    def reject_blank(self):
+        if "name" in self.model_fields_set and not self.name:
+            raise ValueError("Symbol is required")
+        if "title" in self.model_fields_set and not self.title:
+            raise ValueError("Title is required")
+        return self
+
+
+class TagOut(APIModel):
+    id: int
+    name: str
+    title: str
+    description: str | None
+    project_count: int
+
+
+class TagRef(APIModel):
+    id: int
+    name: str
+    title: str
+    description: str | None = None
+
+
+class ProjectWrite(APIModel):
+    name: str = Field(max_length=255)
+    description: str | None = None
+    status: Lifecycle = Lifecycle.assessment
+    group_ids: list[int] = Field(default_factory=list)
+    report_cadence_days: int | None = Field(default=None, ge=0, le=365)
+    reports_with_pmo: bool = False
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def name_clean(cls, value):
+        return _clean_name(value, required=True)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def description_clean(cls, value):
+        return blank_to_none(value)
+
+    @field_validator("group_ids", mode="before")
+    @classmethod
+    def group_ids_clean(cls, value):
+        cleaned = _clean_id_list([] if value is None else value, invalid="Invalid view")
+        return [] if cleaned is None else cleaned
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def tags_clean(cls, value):
+        cleaned = _clean_tag_list([] if value is None else value)
+        return [] if cleaned is None else cleaned
+
+
+class ProjectPatch(APIModel):
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    status: Lifecycle | None = None
+    reports_with_pmo: bool | None = None
+    report_cadence_days: int | None = Field(default=None, ge=0, le=365)
+    tags: list[str] | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def name_clean(cls, value):
+        if value is None:
+            return None
+        return _clean_name(value, required=True)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def description_clean(cls, value):
+        if value is None:
+            return None
+        return blank_to_none(value)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def tags_clean(cls, value):
+        return _clean_tag_list(value)
+
+    @model_validator(mode="after")
     def reject_null_required(self):
         if "name" in self.model_fields_set and not self.name:
             raise ValueError("Name is required")
         if "status" in self.model_fields_set and self.status is None:
             raise ValueError("Status is required")
+        if "reports_with_pmo" in self.model_fields_set and self.reports_with_pmo is None:
+            raise ValueError("Reporting with PMO is required")
+        if "tags" in self.model_fields_set and self.tags is None:
+            raise ValueError("Labels must be a list")
         return self
 
 
 class AssignmentWrite(APIModel):
     resource_id: int
     project_role: ProjectRole = ProjectRole.member
+    utilization_percent: int = Field(default=100, ge=0, le=100)
+    onboarded: bool = False
+    started_at: datetime | None = None
 
 
 class AssignmentPatch(APIModel):
-    project_role: ProjectRole
+    project_role: ProjectRole | None = None
+    utilization_percent: int | None = Field(default=None, ge=0, le=100)
+    onboarded: bool | None = None
+
+    @model_validator(mode="after")
+    def require_a_change(self):
+        present = {"project_role", "utilization_percent", "onboarded"} & self.model_fields_set
+        if not present or any(getattr(self, name) is None for name in present):
+            raise ValueError("Provide a project role, utilization, or onboarded flag")
+        return self
+
+
+class MoveAssignment(APIModel):
+    unassigned: bool = False
+    to_project_id: int | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    highlights: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("highlights", mode="before")
+    @classmethod
+    def highlights_clean(cls, value):
+        return blank_to_none(value)
+
+
+class ContributionPatch(APIModel):
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    utilization_percent: int | None = Field(default=None, ge=0, le=100)
+    project_role: ProjectRole | None = None
+    highlights: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("highlights", mode="before")
+    @classmethod
+    def highlights_clean(cls, value):
+        return blank_to_none(value)
 
 
 class ProjectAssignment(APIModel):
@@ -376,17 +610,103 @@ class ProjectAssignment(APIModel):
     designation_name: str | None
     companies: list[AssignmentCompany]
     project_role: str
+    utilization_percent: int
+    onboarded: bool
+    started_at: Utc
 
 
-class ProjectOut(APIModel):
+class ContributionOut(APIModel):
+    id: int
+    resource_id: int
+    name: str
+    email: str
+    department_name: str
+    designation_name: str | None
+    companies: list[AssignmentCompany]
+    started_at: Utc
+    ended_at: Utc
+    utilization_percent: int
+    project_role: str
+    highlights: str | None
+
+
+class ProjectListItem(APIModel):
     id: int
     name: str
     description: str | None
     status: str
+    archived: bool
+    reports_with_pmo: bool
+    report_cadence_days: int | None
+    tags: list[TagRef]
     assignment_count: int
-    assignments: list[ProjectAssignment]
+    resource_count: int
+    status_report_count: int
+    latest_report_at: UtcOpt = None
+    groups: list[ProjectGroupRef]
     created_at: Utc
     updated_at: Utc
+
+
+class ProjectOut(ProjectListItem):
+    assignments: list[ProjectAssignment]
+    contributions: list[ContributionOut]
+
+
+def _clean_report_flag(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return value
+
+
+class StatusReportCreate(APIModel):
+    body: str
+    created_at: datetime | None = None
+    flag: ReportFlag | None = None
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def body_clean(cls, value):
+        return clean_report_body(value)
+
+    @field_validator("flag", mode="before")
+    @classmethod
+    def flag_clean(cls, value):
+        return _clean_report_flag(value)
+
+
+class StatusReportPatch(APIModel):
+    body: str
+    created_at: datetime | None = None
+    flag: ReportFlag | None = None
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def body_clean(cls, value):
+        return clean_report_body(value)
+
+    @field_validator("flag", mode="before")
+    @classmethod
+    def flag_clean(cls, value):
+        return _clean_report_flag(value)
+
+
+class StatusReportOut(APIModel):
+    id: int
+    project_id: int
+    body: str
+    flag: str | None
+    created_at: Utc
+    updated_at: Utc
+
+
+class StatusReportList(APIModel):
+    items: list[StatusReportOut]
+    total: int
+    latest_report_at: UtcOpt = None
 
 
 class RoleOut(APIModel):

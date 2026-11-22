@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.errors import AppError
-from app.routers import catalog, companies, departments, designations, projects, resources
+from app.routers import catalog, companies, departments, designations, project_groups, projects, resources, tags
 
 
 @asynccontextmanager
@@ -65,7 +65,9 @@ def health():
 
 app.include_router(resources.router)
 app.include_router(projects.router)
+app.include_router(project_groups.router)
 app.include_router(designations.router)
 app.include_router(departments.router)
 app.include_router(companies.router)
 app.include_router(catalog.router)
+app.include_router(tags.router)
