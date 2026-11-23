@@ -14,7 +14,7 @@ export default function AssignResourceForm({ projectName, people, roles, assigne
   const toggleRef = useRef(null);
 
   const available = useMemo(
-    () => (people ?? []).filter((person) => !assignedIds.has(person.id)),
+    () => (people ?? []).filter((person) => !assignedIds.has(person.id) && !person.resigned),
     [people, assignedIds],
   );
 

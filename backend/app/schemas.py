@@ -197,6 +197,7 @@ class ResourceWrite(APIModel):
     location: str | None = None
     designation_id: int | None = None
     company_ids: list[int] = Field(default_factory=list)
+    resigned: bool = False
 
     @field_validator("name", mode="before")
     @classmethod
@@ -250,6 +251,7 @@ class ResourcePatch(APIModel):
     location: str | None = None
     designation_id: int | None = None
     company_ids: list[int] | None = None
+    resigned: bool | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -301,6 +303,8 @@ class ResourcePatch(APIModel):
             raise ValueError("Department is required")
         if "email" in self.model_fields_set and not self.email:
             raise ValueError("Email is required")
+        if "resigned" in self.model_fields_set and self.resigned is None:
+            raise ValueError("Resigned is required")
         return self
 
 
@@ -312,6 +316,7 @@ class ResourceOut(APIModel):
     department: DepartmentRef
     designation: DesignationRef | None
     companies: list[CompanyRef]
+    resigned: bool
     assignments: list[ResourceAssignment]
     created_at: Utc
     updated_at: Utc
@@ -609,6 +614,7 @@ class ProjectAssignment(APIModel):
     department_name: str
     designation_name: str | None
     companies: list[AssignmentCompany]
+    resigned: bool
     project_role: str
     utilization_percent: int
     onboarded: bool

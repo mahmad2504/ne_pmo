@@ -18,9 +18,14 @@ const emptyForm = {
   designation_id: '',
   location: '',
   company_ids: [],
+  resigned: false,
 };
 
-export default function ResourcesPage({ canEdit, onOpenProject }) {
+function projectCountLabel(count) {
+  return `${count} ${count === 1 ? 'project' : 'projects'}`;
+}
+
+export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = false }) {
   const [rows, setRows] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [titles, setTitles] = useState([]);
@@ -30,6 +35,7 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
   const [departmentId, setDepartmentId] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [location, setLocation] = useState('');
+  const [projectCount, setProjectCount] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -52,6 +58,8 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
         department_id: next.departmentId ?? departmentId,
         company_id: next.companyId ?? companyId,
         location: next.location ?? location,
+        resigned_only: resignedOnly,
+        project_count: next.projectCount ?? projectCount,
       });
       if (id !== requestId.current) return;
       setRows(people);
@@ -118,6 +126,7 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
       designation_id: row.designation ? String(row.designation.id) : '',
       location: row.location || '',
       company_ids: row.companies.map((company) => company.id),
+      resigned: Boolean(row.resigned),
     });
     setShowForm(true);
     setError('');
@@ -150,6 +159,7 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
       designation_id: form.designation_id ? Number(form.designation_id) : null,
       location: form.location || null,
       company_ids: form.company_ids,
+      resigned: form.resigned,
     };
     try {
       if (editingId) await updateResource(editingId, body);
@@ -186,13 +196,15 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
   }
 
   return (
-    <>
+    <div className="resources-page">
       <header className="main-header">
         <div>
-          <h1>Resources</h1>
-          <p className="subtitle">People in the directory, with a department, job title, email, location, and the companies they are onboarded with.</p>
+          <h1>{resignedOnly ? 'Resigned' : 'Resources'}</h1>
+          <p className="subtitle">{resignedOnly
+            ? 'People who have left, with the same department, job title, and project history.'
+            : 'People in the directory, with a department, job title, email, location, and the companies they are onboarded with.'}</p>
         </div>
-        {canEdit ? (
+        {canEdit && !resignedOnly ? (
           <button type="button" className="btn btn--primary" onClick={beginCreate} disabled={departments.length === 0}>
             Add person
           </button>
@@ -229,7 +241,7 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
           </select>
         </label>
         <label>
-          Onboarded with
+          Onboarded
           <select
             value={companyId}
             onChange={(event) => {
@@ -260,8 +272,24 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
             ))}
           </select>
         </label>
+        <label>
+          Projects
+          <select
+            value={projectCount}
+            onChange={(event) => {
+              const value = event.target.value;
+              setProjectCount(value);
+              refresh({ projectCount: value });
+            }}
+          >
+            <option value="">All</option>
+            <option value="single">Single</option>
+            <option value="multiple">Multiple</option>
+            <option value="none">No projects</option>
+          </select>
+        </label>
       </div>
-      {canEdit && departments.length === 0 ? (
+      {canEdit && !resignedOnly && departments.length === 0 ? (
         <p className="empty">Add a department before adding a person.</p>
       ) : null}
       {canEdit ? (
@@ -310,8 +338,18 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
                 ))}
               </select>
             </label>
+            <label>
+              Resigned
+              <span className="check-slot">
+                <input
+                  type="checkbox"
+                  checked={form.resigned}
+                  onChange={(event) => setForm((current) => ({ ...current, resigned: event.target.checked }))}
+                />
+              </span>
+            </label>
             <fieldset className="check-group">
-              <legend>Onboarded with</legend>
+              <legend>Onboarded</legend>
               {companies.length === 0 ? (
                 <span className="muted">No companies yet.</span>
               ) : (
@@ -349,24 +387,66 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
       {loading ? <p className="muted">Loading…</p> : rows.length === 0 ? (
         <p className="empty">No people match.</p>
       ) : (
-        <table className="data">
+        <table className="data resources-table">
+          <colgroup>
+            <col className="resources-table__name" />
+            <col className="resources-table__department" />
+            <col className="resources-table__title" />
+            <col className="resources-table__companies" />
+            <col className="resources-table__location" />
+            <col className="resources-table__projects" />
+            <col className="resources-table__actions" />
+          </colgroup>
           <thead>
             <tr>
               <th>Name</th>
               <th>Department</th>
               <th>Job title</th>
-              <th>Onboarded with</th>
+              <th>Onboarded</th>
               <th>Location</th>
               <th>Projects</th>
-              {canEdit ? <th /> : null}
+              <th />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td>
+                <td className="clip-cell">
                   <span className="name-cell">
-                    {row.name}
+                    <span className="clip" title={row.name}>{row.name}</span>
+                    {row.resigned && !resignedOnly ? <span className="flag">Resigned</span> : null}
+                  </span>
+                </td>
+                <td>{row.department.name}</td>
+                <td className="clip-cell">{row.designation?.name
+                  ? <span className="clip" title={row.designation.name}>{row.designation.name}</span>
+                  : <span className="muted">—</span>}</td>
+                <td className="companies-cell">{row.companies.length ? row.companies.map((company) => (
+                  <CompanyLabel key={company.id} name={company.name} icon={company.icon} iconOnly />
+                )) : <span className="muted">—</span>}</td>
+                <td>{row.location || <span className="muted">—</span>}</td>
+                <td>
+                  {row.assignments.length === 0 ? <span className="muted">—</span> : (
+                    <button
+                      type="button"
+                      className="project-count"
+                      title={projectCountLabel(row.assignments.length)}
+                      aria-label={projectCountLabel(row.assignments.length)}
+                      onClick={() => onOpenProjects(row.id)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          fill="currentColor"
+                          fillRule="evenodd"
+                          d="M9.75 3a2.25 2.25 0 0 0-2.25 2.25V6H3.75A2.25 2.25 0 0 0 1.5 8.25v9A2.25 2.25 0 0 0 3.75 19.5h16.5a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 20.25 6h-3.75v-.75A2.25 2.25 0 0 0 14.25 3h-4.5Zm0 2.25a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 .75.75V6h-6v-.75Z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span>{row.assignments.length}</span>
+                    </button>
+                  )}
+                </td>
+                <td className="row-actions">
                     <button
                       type="button"
                       className="btn btn--ghost btn--icon"
@@ -381,32 +461,39 @@ export default function ResourcesPage({ canEdit, onOpenProject }) {
                         </svg>
                       )}
                     </button>
-                  </span>
-                </td>
-                <td>{row.department.name}</td>
-                <td>{row.designation?.name || <span className="muted">—</span>}</td>
-                <td className="companies-cell">{row.companies.length ? row.companies.map((company) => (
-                  <CompanyLabel key={company.id} name={company.name} icon={company.icon} iconOnly />
-                )) : <span className="muted">—</span>}</td>
-                <td>{row.location || <span className="muted">—</span>}</td>
-                <td>
-                  {row.assignments.length === 0 ? <span className="muted">—</span> : row.assignments.map((item) => (
-                    <button key={item.project_id} type="button" className="link" onClick={() => onOpenProject(item.project_id)}>
-                      {item.project_name}
-                    </button>
-                  ))}
-                </td>
-                {canEdit ? (
-                  <td className="row-actions">
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => beginEdit(row)}>Edit</button>
-                    <button type="button" className="btn btn--danger btn--sm" onClick={() => onDelete(row)}>Delete</button>
+                    {canEdit ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--icon"
+                          title="Edit"
+                          aria-label={`Edit ${row.name}`}
+                          onClick={() => beginEdit(row)}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" />
+                            <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" d="m13.5 6.5 3 3" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger btn--icon"
+                          title="Delete"
+                          aria-label={`Delete ${row.name}`}
+                          onClick={() => onDelete(row)}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7M7 7l.8 12.2A1.5 1.5 0 0 0 9.3 20.5h5.4a1.5 1.5 0 0 0 1.5-1.3L17 7" />
+                          </svg>
+                        </button>
+                      </>
+                    ) : null}
                   </td>
-                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       )}
-    </>
+    </div>
   );
 }

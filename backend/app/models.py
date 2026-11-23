@@ -54,6 +54,7 @@ class Resource(Base):
     designation_id: Mapped[int | None] = mapped_column(
         ForeignKey("designations.id", ondelete="SET NULL"), index=True
     )
+    resigned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

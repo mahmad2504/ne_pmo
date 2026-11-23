@@ -112,6 +112,7 @@ def _payload(db: Session, row: Resource) -> dict:
             "description": designation.description,
         },
         "companies": _company_payloads(row),
+        "resigned": row.resigned,
         "assignments": _assignment_payloads(db, row.id),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -124,8 +125,15 @@ def list_resources(
     department_id: int | None = None,
     location: str | None = None,
     company_id: int | None = None,
+    include_resigned: bool = False,
+    resigned_only: bool = False,
+    project_count: str | None = None,
 ) -> list[dict]:
     stmt = select(Resource).options(*_resource_options())
+    if resigned_only:
+        stmt = stmt.where(Resource.resigned.is_(True))
+    elif not include_resigned:
+        stmt = stmt.where(Resource.resigned.is_(False))
     needle = (q or "").strip().lower()
     if needle:
         stmt = stmt.where(
@@ -147,6 +155,17 @@ def list_resources(
         if code not in LOCATIONS:
             raise AppError(422, "Invalid location")
         stmt = stmt.where(Resource.location == code)
+    count = (project_count or "").strip().lower()
+    if count:
+        if count not in {"multiple", "single", "none"}:
+            raise AppError(422, "Invalid project count")
+        assigned = select(ProjectResource.resource_id).group_by(ProjectResource.resource_id)
+        if count == "multiple":
+            stmt = stmt.where(Resource.id.in_(assigned.having(func.count(ProjectResource.project_id) > 1)))
+        elif count == "single":
+            stmt = stmt.where(Resource.id.in_(assigned.having(func.count(ProjectResource.project_id) == 1)))
+        else:
+            stmt = stmt.where(~Resource.id.in_(select(ProjectResource.resource_id)))
     rows = db.scalars(stmt.order_by(func.lower(Resource.name), Resource.id)).unique().all()
     return [_payload(db, row) for row in rows]
 
@@ -165,6 +184,7 @@ def create_resource(db: Session, body: ResourceWrite) -> dict:
         email=str(body.email).lower(),
         location=body.location,
         designation_id=body.designation_id,
+        resigned=body.resigned,
         created_at=now,
         updated_at=now,
     )
@@ -194,6 +214,8 @@ def patch_resource(db: Session, resource_id: int, body: ResourcePatch) -> dict:
         row.email = str(body.email).lower()
     if "location" in fields:
         row.location = body.location
+    if "resigned" in fields and body.resigned is not None:
+        row.resigned = body.resigned
     if "company_ids" in fields:
         _replace_companies(db, row, body.company_ids or [])
     row.updated_at = utcnow()

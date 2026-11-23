@@ -62,9 +62,12 @@ export const listResources = (params = {}) => {
   if (params.department_id) query.set('department_id', String(params.department_id));
   if (params.location) query.set('location', params.location);
   if (params.company_id) query.set('company_id', String(params.company_id));
+  if (params.resigned_only) query.set('resigned_only', 'true');
+  if (params.project_count) query.set('project_count', params.project_count);
   const suffix = query.toString();
   return api(`/api/resources${suffix ? `?${suffix}` : ''}`);
 };
+export const getResource = (id) => api(`/api/resources/${id}`);
 export const createResource = (body) => api('/api/resources', { method: 'POST', body: JSON.stringify(body) });
 export const updateResource = (id, body) => api(`/api/resources/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 export const deleteResource = (id) => api(`/api/resources/${id}`, { method: 'DELETE' });
@@ -76,6 +79,7 @@ export const listProjects = (q, params = {}) => {
   if (params.ungrouped) query.set('ungrouped', 'true');
   if (params.archived) query.set('archived', 'true');
   if (params.tagId) query.set('tag_id', String(params.tagId));
+  if (params.resourceId) query.set('resource_id', String(params.resourceId));
   const suffix = query.toString();
   return api(`/api/projects${suffix ? `?${suffix}` : ''}`);
 };

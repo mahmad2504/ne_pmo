@@ -256,7 +256,7 @@ export default function ProjectReports({
 
   return (
     <>
-    <div className="subprojects">
+    <div className="subprojects project-fold">
       <div className="subprojects__header">
         <button
           type="button"

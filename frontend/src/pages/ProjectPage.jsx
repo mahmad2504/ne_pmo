@@ -50,9 +50,11 @@ function utcDay(value) {
   return date.toISOString().slice(0, 10);
 }
 
-function FoldSection({ title, count, actionLabel, onAction, empty, children }) {
+function FoldSection({ title, count, actionLabel, onAction, empty, isEmpty, defaultOpen = false, children }) {
   const panelId = useId();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const showCount = count != null;
+  const collapsed = isEmpty ?? (showCount && count === 0);
 
   function runAction() {
     setOpen(true);
@@ -71,7 +73,7 @@ function FoldSection({ title, count, actionLabel, onAction, empty, children }) {
         >
           <span className={`subprojects__chevron${open ? ' subprojects__chevron--open' : ''}`} aria-hidden="true" />
           <span className="subprojects__label">{title}</span>
-          <span className="subprojects__count">{count}</span>
+          {showCount ? <span className="subprojects__count">{count}</span> : null}
         </button>
         {actionLabel ? (
           <button type="button" className="btn btn--secondary btn--sm" onClick={runAction}>
@@ -80,13 +82,13 @@ function FoldSection({ title, count, actionLabel, onAction, empty, children }) {
         ) : null}
       </div>
       <div id={panelId} className="project-fold__panel" hidden={!open}>
-        {count === 0 ? <p className="empty">{empty}</p> : children}
+        {collapsed ? <p className="empty">{empty}</p> : children}
       </div>
     </div>
   );
 }
 
-export default function ProjectPage({ projectId, canEdit, onClose, registerLeaveGuard }) {
+export default function ProjectPage({ projectId, canEdit, onClose, backLabel, registerLeaveGuard }) {
   const [project, setProject] = useState(null);
   const [form, setForm] = useState(null);
   const [people, setPeople] = useState([]);
@@ -492,7 +494,7 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
       <header className="main-header">
         <div>
           <button type="button" className="link link--back" onClick={onClose}>
-            {project.archived ? 'Archive' : 'Projects'}
+            {backLabel || (project.archived ? 'Archive' : 'Projects')}
           </button>
           <h1>{project.name}</h1>
         </div>
@@ -506,11 +508,9 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
         ) : null}
       </header>
       {error ? <p className="banner" role="alert">{error}</p> : null}
+      <FoldSection title="Project details" defaultOpen>
       <section className="panel project-details">
-        <header className="project-details__head">
-          <h2>Project details</h2>
-          {canEdit ? <p className="muted">Changes save when you leave a field.</p> : null}
-        </header>
+        {canEdit ? <p className="muted">Changes save when you leave a field.</p> : null}
         <div className="project-details__meta">
           <label>
             Name
@@ -527,7 +527,7 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
           </label>
           <label>
             Status
-            <select value={project.status} disabled={!canEdit} onChange={(event) => onStatus(event.target.value)}>
+            <select className={`status-select status-select--${project.status}`} value={project.status} disabled={!canEdit} onChange={(event) => onStatus(event.target.value)}>
               {lifecycle.map((item) => (
                 <option key={item.code} value={item.code}>{item.label}</option>
               ))}
@@ -575,100 +575,103 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
             />
           </label>
         </div>
+        <div className="split-panels">
+          <div className="project-details__choice">
+            <span className="project-details__caption">Views</span>
+            {groups.length === 0 ? <p className="muted">No views yet. Create one from the projects list.</p> : (
+              <>
+                {canEdit ? (
+                  availableGroups.length > 0 ? (
+                    <div className="label-picker">
+                      <select
+                        aria-label="Views"
+                        value=""
+                        onChange={(event) => addPickedView(event.target.value)}
+                      >
+                        <option value="">Choose a view</option>
+                        {availableGroups.map((item) => (
+                          <option key={item.id} value={item.id} title={item.description || undefined}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : <p className="project-details__note">Every view already includes this project.</p>
+                ) : project.groups.length === 0 ? <p className="muted">Not in a view</p> : null}
+                {project.groups.length > 0 ? (
+                  <ul className="label-list">
+                    {project.groups.map((group) => (
+                      <li key={group.id} className="label-chip">
+                        {group.name}
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            className="label-chip__remove"
+                            aria-label={`Remove ${group.name}`}
+                            onClick={() => onToggleGroup(group.id)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
+          </div>
+          <div className="project-details__choice">
+            <span className="project-details__caption">Labels</span>
+            {labels.length === 0 ? <p className="muted">No labels yet. Add them on the Labels page.</p> : (
+              <>
+                {canEdit ? (
+                  availableLabels.length > 0 ? (
+                    <div className="label-picker">
+                      <select
+                        aria-label="Labels"
+                        value=""
+                        onChange={(event) => addPickedLabel(event.target.value)}
+                      >
+                        <option value="">Choose a label</option>
+                        {availableLabels.map((item) => (
+                          <option key={item.id} value={item.id} title={item.title}>
+                            {item.name} — {item.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : <p className="project-details__note">Every label is already on this project.</p>
+                ) : project.tags.length === 0 ? <p className="muted">No labels</p> : null}
+                {project.tags.length > 0 ? (
+                  <ul className="label-list">
+                    {project.tags.map((tag) => (
+                      <li key={tag.id} className="label-chip" title={tag.title}>
+                        {tag.name}
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            className="label-chip__remove"
+                            aria-label={`Remove ${tag.name}`}
+                            onClick={() => onToggleLabel(tag.name)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
       </section>
-
-      <div className="split-panels">
-        <section className="panel">
-          {groups.length === 0 ? <p className="muted">No views yet. Create one from the projects list.</p> : (
-            <>
-              {project.groups.length > 0 ? (
-                <ul className="label-list">
-                  {project.groups.map((group) => (
-                    <li key={group.id} className="label-chip">
-                      {group.name}
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="label-chip__remove"
-                          aria-label={`Remove ${group.name}`}
-                          onClick={() => onToggleGroup(group.id)}
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (!canEdit || availableGroups.length === 0) ? <p className="muted">Not in a view</p> : null}
-              {canEdit ? (
-                availableGroups.length > 0 ? (
-                  <div className="label-picker">
-                    <select
-                      aria-label="Views"
-                      value=""
-                      onChange={(event) => addPickedView(event.target.value)}
-                    >
-                      <option value="">Choose a view</option>
-                      {availableGroups.map((item) => (
-                        <option key={item.id} value={item.id} title={item.description || undefined}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : <p className="muted">Every view already includes this project.</p>
-              ) : null}
-            </>
-          )}
-        </section>
-        <section className="panel">
-          {labels.length === 0 ? <p className="muted">No labels yet. Add them on the Labels page.</p> : (
-            <>
-              {project.tags.length > 0 ? (
-                <ul className="label-list">
-                  {project.tags.map((tag) => (
-                    <li key={tag.id} className="label-chip" title={tag.title}>
-                      {tag.name}
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="label-chip__remove"
-                          aria-label={`Remove ${tag.name}`}
-                          onClick={() => onToggleLabel(tag.name)}
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (!canEdit || availableLabels.length === 0) ? <p className="muted">No labels</p> : null}
-              {canEdit ? (
-                availableLabels.length > 0 ? (
-                  <div className="label-picker">
-                    <select
-                      aria-label="Labels"
-                      value=""
-                      onChange={(event) => addPickedLabel(event.target.value)}
-                    >
-                      <option value="">Choose a label</option>
-                      {availableLabels.map((item) => (
-                        <option key={item.id} value={item.id} title={item.title}>
-                          {item.name} — {item.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : <p className="muted">Every label is already on this project.</p>
-              ) : null}
-            </>
-          )}
-        </section>
-      </div>
+      </FoldSection>
 
       <FoldSection
         title="People"
-        count={project.assignments.length}
+        count={project.assignments.filter((row) => !row.resigned).length}
+        isEmpty={project.assignments.length === 0}
         actionLabel={canEdit ? 'Add person' : undefined}
         onAction={() => { setAssignError(''); setAdding(true); }}
         empty="No one is assigned yet."
@@ -684,12 +687,19 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
             </tr>
           </thead>
           <tbody>
-            {project.assignments.map((row) => (
-              <tr key={row.resource_id}>
-                <td>{row.name}</td>
+            {[...project.assignments]
+              .sort((a, b) => Number(Boolean(a.resigned)) - Number(Boolean(b.resigned)))
+              .map((row) => (
+              <tr key={row.resource_id} className={row.resigned ? 'data-row--resigned' : undefined}>
+                <td>
+                  <span className="name-cell">
+                    {row.name}
+                    {row.resigned ? <span className="flag">Resigned</span> : null}
+                  </span>
+                </td>
                 <td>{row.department_name}</td>
                 <td>
-                  {canEdit ? (
+                  {canEdit && !row.resigned ? (
                     <input
                       className="util-input"
                       key={`${row.resource_id}-${row.utilization_percent}`}
@@ -701,7 +711,7 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
                   ) : `${row.utilization_percent}%`}
                 </td>
                 <td>
-                  {canEdit ? (
+                  {canEdit && !row.resigned ? (
                     <select value={row.project_role} onChange={(event) => onRoleChange(row.resource_id, event.target.value)}>
                       {roles.map((role) => (
                         <option key={role.code} value={role.code}>{role.label}</option>
@@ -757,7 +767,6 @@ export default function ProjectPage({ projectId, canEdit, onClose, registerLeave
         </ul>
       </FoldSection>
 
-      <h2 className="section-title">Reports</h2>
       <ProjectReports
         reports={reports}
         latestReportAt={latestReportAt}

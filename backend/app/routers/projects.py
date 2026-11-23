@@ -32,10 +32,17 @@ def list_projects(
     ungrouped: bool = False,
     archived: bool = False,
     tag_id: int | None = None,
+    resource_id: int | None = None,
     db: Session = Depends(get_db),
 ):
     return service.list_projects(
-        db, q=q, group_id=group_id, ungrouped=ungrouped, archived=archived, tag_id=tag_id
+        db,
+        q=q,
+        group_id=group_id,
+        ungrouped=ungrouped,
+        archived=archived,
+        tag_id=tag_id,
+        resource_id=resource_id,
     )
 
 

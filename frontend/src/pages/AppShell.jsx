@@ -4,7 +4,7 @@ function navClass(active) {
   return active ? 'nav-item nav-item--active' : 'nav-item';
 }
 
-export default function AppShell({ session, view, groups, activeGroup, onNavigate, onSelectGroup, children }) {
+export default function AppShell({ session, view, onNavigate, children }) {
   const label = session.name || session.username;
   const role = session.roles.includes('admin') ? 'admin' : 'user';
 
@@ -19,11 +19,14 @@ export default function AppShell({ session, view, groups, activeGroup, onNavigat
           </div>
         </div>
         <nav className="sidebar__nav">
-          <button type="button" className={navClass(view === 'projects' && activeGroup === null)} onClick={() => onNavigate('projects')}>
+          <button type="button" className={navClass(view === 'projects')} onClick={() => onNavigate('projects')}>
             Projects
           </button>
           <button type="button" className={navClass(view === 'resources')} onClick={() => onNavigate('resources')}>
             Resources
+          </button>
+          <button type="button" className={navClass(view === 'resigned')} onClick={() => onNavigate('resigned')}>
+            Resigned
           </button>
           <button type="button" className={navClass(view === 'job-titles')} onClick={() => onNavigate('job-titles')}>
             Job titles
@@ -40,20 +43,6 @@ export default function AppShell({ session, view, groups, activeGroup, onNavigat
           <button type="button" className={navClass(view === 'archive')} onClick={() => onNavigate('archive')}>
             Archive
           </button>
-          <div className="sidebar__views">
-            <span className="sidebar__views-label">Views</span>
-            {groups.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={navClass(String(item.id) === activeGroup)}
-                onClick={() => onSelectGroup(String(item.id))}
-              >
-                {item.name}
-              </button>
-            ))}
-            {groups.length === 0 ? <p className="sidebar__views-empty">No views yet</p> : null}
-          </div>
         </nav>
         <div className="sidebar__foot">
           <span className="sidebar__who">

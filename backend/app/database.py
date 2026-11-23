@@ -168,9 +168,26 @@ def _ensure_project_workspace() -> None:
             )
 
 
+def _ensure_resource_resigned() -> None:
+    from sqlalchemy import text
+
+    columns = _column_names("resources")
+    if columns is None or "resigned" in columns:
+        return
+    engine = get_engine()
+    boolean = (
+        "BOOLEAN NOT NULL DEFAULT false"
+        if engine.dialect.name == "postgresql"
+        else "BOOLEAN NOT NULL DEFAULT 0"
+    )
+    with engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE resources ADD COLUMN resigned {boolean}"))
+
+
 def init_db() -> None:
     ensure_postgres_database()
     Base.metadata.create_all(get_engine())
     _ensure_company_icon()
     _ensure_project_workspace()
+    _ensure_resource_resigned()
     _seed_companies()

@@ -81,7 +81,12 @@ export default function ProjectUsersDialog({ project, canEdit, onClose, onUpdate
             <tbody>
               {rows.map((row) => (
                 <tr key={row.resource_id}>
-                  <td>{row.name}</td>
+                  <td>
+                    <span className="name-cell">
+                      {row.name}
+                      {row.resigned ? <span className="flag">Resigned</span> : null}
+                    </span>
+                  </td>
                   <td>{row.project_role}</td>
                   <td>
                     {canEdit ? (

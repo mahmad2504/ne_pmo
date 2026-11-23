@@ -16,10 +16,20 @@ def list_resources(
     department_id: int | None = None,
     location: str | None = None,
     company_id: int | None = None,
+    include_resigned: bool = False,
+    resigned_only: bool = False,
+    project_count: str | None = None,
     db: Session = Depends(get_db),
 ):
     return service.list_resources(
-        db, q=q, department_id=department_id, location=location, company_id=company_id
+        db,
+        q=q,
+        department_id=department_id,
+        location=location,
+        company_id=company_id,
+        include_resigned=include_resigned,
+        resigned_only=resigned_only,
+        project_count=project_count,
     )
 
 

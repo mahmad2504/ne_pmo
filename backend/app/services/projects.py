@@ -60,6 +60,7 @@ def _person_fields(person: Resource) -> dict:
         "department_name": person.department.name,
         "designation_name": None if person.designation is None else person.designation.name,
         "companies": _companies(person),
+        "resigned": person.resigned,
     }
 
 
@@ -134,7 +135,11 @@ def _assignment_counts(db: Session, project_ids: list[int]) -> dict[int, int]:
         return result
     rows = db.execute(
         select(ProjectResource.project_id, func.count(ProjectResource.resource_id))
-        .where(ProjectResource.project_id.in_(project_ids))
+        .join(Resource, Resource.id == ProjectResource.resource_id)
+        .where(
+            ProjectResource.project_id.in_(project_ids),
+            Resource.resigned.is_(False),
+        )
         .group_by(ProjectResource.project_id)
     ).all()
     for project_id, count in rows:
@@ -237,6 +242,7 @@ def _payload(
         stats = _report_stats(db, [row.id]).get(row.id, {"status_report_count": 0, "latest_report_at": None})
     if contributions is None:
         contributions = _contribution_rows(db, [row.id]).get(row.id, [])
+    active_count = sum(1 for item in assignments if not item["resigned"])
     return {
         "id": row.id,
         "name": row.name,
@@ -246,8 +252,8 @@ def _payload(
         "reports_with_pmo": row.reports_with_pmo,
         "report_cadence_days": row.report_cadence_days,
         "tags": tags,
-        "assignment_count": len(assignments),
-        "resource_count": len(assignments),
+        "assignment_count": active_count,
+        "resource_count": active_count,
         "status_report_count": stats["status_report_count"],
         "latest_report_at": stats["latest_report_at"],
         "assignments": assignments,
@@ -310,6 +316,7 @@ def list_projects(
     ungrouped: bool = False,
     archived: bool = False,
     tag_id: int | None = None,
+    resource_id: int | None = None,
 ) -> list[dict]:
     if group_id is not None and ungrouped:
         raise AppError(422, "Choose a view or ungrouped projects")
@@ -317,7 +324,17 @@ def list_projects(
         raise AppError(404, "View not found")
     if tag_id is not None and db.get(Tag, tag_id) is None:
         raise AppError(404, "Label not found")
-    stmt = select(Project).where(Project.archived.is_(archived))
+    if resource_id is not None and db.get(Resource, resource_id) is None:
+        raise AppError(404, "Person not found")
+    stmt = select(Project)
+    if resource_id is None:
+        stmt = stmt.where(Project.archived.is_(archived))
+    else:
+        stmt = stmt.where(
+            Project.id.in_(
+                select(ProjectResource.project_id).where(ProjectResource.resource_id == resource_id)
+            )
+        )
     if group_id is not None:
         stmt = stmt.where(
             Project.id.in_(
@@ -438,7 +455,9 @@ def delete_project(db: Session, project_id: int) -> None:
 
 def assign_resource(db: Session, project_id: int, body: AssignmentWrite) -> dict:
     project = _require_project(db, project_id)
-    _require_resource(db, body.resource_id)
+    person = _require_resource(db, body.resource_id)
+    if person.resigned:
+        raise AppError(409, "That person has resigned")
     existing = db.get(ProjectResource, (project_id, body.resource_id))
     if existing is not None:
         raise AppError(409, "That person is already on this project")
@@ -506,6 +525,8 @@ def move_assignment(db: Session, project_id: int, resource_id: int, body: MoveAs
     kept_onboarded = link.onboarded
     destination = None
     if has_project:
+        if person.resigned:
+            raise AppError(409, "That person has resigned")
         if body.to_project_id == project_id:
             raise AppError(422, "Cannot move a person onto the same project")
         destination = _require_project(db, body.to_project_id)

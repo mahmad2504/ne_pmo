@@ -151,6 +151,38 @@ def test_a_project_can_sit_in_several_views(client):
     assert forbidden_move.status_code == 403
 
 
+def test_project_list_filters_by_resource(client):
+    department = create_department(client)
+    ada = create_person(client, name="Ada", email="ada@example.com", department_id=department["id"])
+    grace = create_person(
+        client, name="Grace", email="grace@example.com", department_id=department["id"]
+    )
+    active = create_project(client, name="Nimbus")
+    stored = create_project(client, name="Orbit")
+    other = create_project(client, name="Relay")
+    assert client.post(f"/api/projects/{active['id']}/resources", json={"resource_id": ada["id"]}).status_code == 200
+    assert client.post(f"/api/projects/{stored['id']}/resources", json={"resource_id": ada["id"]}).status_code == 200
+    assert client.post(f"/api/projects/{other['id']}/resources", json={"resource_id": grace["id"]}).status_code == 200
+
+    completed = client.patch(f"/api/projects/{stored['id']}", json={"status": "completed"})
+    assert completed.status_code == 200
+    archived = client.post(f"/api/projects/{stored['id']}/archive")
+    assert archived.status_code == 200
+
+    listed = client.get("/api/projects", params={"resource_id": ada["id"]})
+    assert listed.status_code == 200
+    assert {row["name"] for row in listed.json()} == {"Nimbus", "Orbit"}
+    orbit = next(row for row in listed.json() if row["name"] == "Orbit")
+    assert orbit["archived"] is True
+
+    open_list = client.get("/api/projects")
+    assert "Orbit" not in {row["name"] for row in open_list.json()}
+    assert "Relay" in {row["name"] for row in open_list.json()}
+
+    missing = client.get("/api/projects", params={"resource_id": 9999})
+    assert missing.status_code == 404
+
+
 def test_project_list_skips_assignment_graphs(client):
     department = create_department(client)
     person = create_person(client, name="Ada", email="ada@example.com", department_id=department["id"])
@@ -187,3 +219,119 @@ def test_reader_cannot_change_an_assignment(client):
         json={"project_role": "member"},
     )
     assert forbidden.status_code == 403
+
+
+def test_resigned_person_stays_assigned_but_cannot_be_added(client):
+    department = create_department(client)
+    ada = create_person(client, name="Ada", email="ada@example.com", department_id=department["id"])
+    grace = create_person(
+        client, name="Grace", email="grace@example.com", department_id=department["id"]
+    )
+    assert ada["resigned"] is False
+
+    listed = client.get("/api/resources")
+    assert {row["name"] for row in listed.json()} == {"Ada", "Grace"}
+
+    current = create_project(client, name="Nimbus")
+    other = create_project(client, name="Orbit")
+    assigned = client.post(f"/api/projects/{current['id']}/resources", json={"resource_id": ada["id"]})
+    assert assigned.status_code == 200
+
+    resigned = client.patch(f"/api/resources/{ada['id']}", json={"resigned": True})
+    assert resigned.status_code == 200
+    assert resigned.json()["resigned"] is True
+    assert resigned.json()["assignments"][0]["project_id"] == current["id"]
+
+    hidden = client.get("/api/resources")
+    assert [row["name"] for row in hidden.json()] == ["Grace"]
+    shown = client.get("/api/resources", params={"include_resigned": True})
+    assert {row["name"] for row in shown.json()} == {"Ada", "Grace"}
+    only = client.get("/api/resources", params={"resigned_only": True})
+    assert [row["name"] for row in only.json()] == ["Ada"]
+    both = client.get("/api/resources", params={"include_resigned": True, "resigned_only": True})
+    assert [row["name"] for row in both.json()] == ["Ada"]
+
+    still = client.get(f"/api/projects/{current['id']}")
+    assert still.json()["assignments"][0]["resource_id"] == ada["id"]
+    assert still.json()["assignments"][0]["resigned"] is True
+    assert still.json()["resource_count"] == 0
+    assert still.json()["assignment_count"] == 0
+    listed_projects = client.get("/api/projects")
+    nimbus = next(item for item in listed_projects.json() if item["id"] == current["id"])
+    assert nimbus["resource_count"] == 0
+    assert nimbus["assignment_count"] == 0
+
+    active = client.post(f"/api/projects/{current['id']}/resources", json={"resource_id": grace["id"]})
+    assert active.status_code == 200
+    with_grace = active.json()
+    assert with_grace["resource_count"] == 1
+    assert with_grace["assignment_count"] == 1
+    assert {row["resource_id"] for row in with_grace["assignments"]} == {ada["id"], grace["id"]}
+    assert next(row for row in with_grace["assignments"] if row["resource_id"] == ada["id"])["resigned"] is True
+
+    blocked = client.post(f"/api/projects/{other['id']}/resources", json={"resource_id": ada["id"]})
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "That person has resigned"
+
+    moved = client.post(
+        f"/api/projects/{current['id']}/resources/{ada['id']}/move",
+        json={"to_project_id": other["id"]},
+    )
+    assert moved.status_code == 409
+    assert client.get(f"/api/projects/{current['id']}").json()["assignments"][0]["resource_id"] == ada["id"]
+
+    kept = client.patch(
+        f"/api/projects/{current['id']}/resources/{ada['id']}",
+        json={"utilization_percent": 40},
+    )
+    assert kept.status_code == 200
+    assert kept.json()["assignments"][0]["utilization_percent"] == 40
+
+    cleared = client.patch(f"/api/resources/{ada['id']}", json={"resigned": False})
+    assert cleared.status_code == 200
+    empty = client.get("/api/resources", params={"resigned_only": True})
+    assert empty.json() == []
+    added = client.post(f"/api/projects/{other['id']}/resources", json={"resource_id": ada["id"]})
+    assert added.status_code == 200
+    assert {row["resource_id"] for row in added.json()["assignments"]} == {ada["id"]}
+    assert grace["id"] not in {row["resource_id"] for row in added.json()["assignments"]}
+
+
+def test_multi_project_filter_keeps_people_on_more_than_one_project(client):
+    department = create_department(client)
+    shared = create_person(client, name="Ada", email="ada@example.com", department_id=department["id"])
+    single = create_person(
+        client, name="Grace", email="grace@example.com", department_id=department["id"]
+    )
+    create_person(client, name="Lin", email="lin@example.com", department_id=department["id"])
+    nimbus = create_project(client, name="Nimbus")
+    orbit = create_project(client, name="Orbit")
+
+    assert client.post(
+        f"/api/projects/{nimbus['id']}/resources", json={"resource_id": shared["id"]}
+    ).status_code == 200
+    assert client.post(
+        f"/api/projects/{orbit['id']}/resources", json={"resource_id": shared["id"]}
+    ).status_code == 200
+    assert client.post(
+        f"/api/projects/{nimbus['id']}/resources", json={"resource_id": single["id"]}
+    ).status_code == 200
+
+    everyone = client.get("/api/resources")
+    assert {row["name"] for row in everyone.json()} == {"Ada", "Grace", "Lin"}
+
+    multiple = client.get("/api/resources", params={"project_count": "multiple"})
+    assert multiple.status_code == 200
+    assert [row["name"] for row in multiple.json()] == ["Ada"]
+    assert len(multiple.json()[0]["assignments"]) == 2
+
+    one = client.get("/api/resources", params={"project_count": "single"})
+    assert [row["name"] for row in one.json()] == ["Grace"]
+    assert len(one.json()[0]["assignments"]) == 1
+
+    none = client.get("/api/resources", params={"project_count": "none"})
+    assert [row["name"] for row in none.json()] == ["Lin"]
+    assert none.json()[0]["assignments"] == []
+
+    invalid = client.get("/api/resources", params={"project_count": "many"})
+    assert invalid.status_code == 422
