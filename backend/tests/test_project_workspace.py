@@ -1,4 +1,4 @@
-from tests.conftest import create_department, create_person, create_project
+from tests.conftest import create_company, create_department, create_person, create_project
 
 
 def _label(client, name="Hot", title="Hot item"):
@@ -135,6 +135,31 @@ def test_utilization_and_recorded_contribution(client):
     assert contribution_id not in [row["id"] for row in removed.json()["contributions"]]
 
 
+def test_assignment_lists_companies_and_project_count(client):
+    department = create_department(client)
+    arm = create_company(client, name="ARM")
+    ada = create_person(
+        client,
+        name="Ada",
+        email="ada@example.com",
+        department_id=department["id"],
+        company_ids=[arm["id"]],
+    )
+    first = create_project(client, name="Nimbus")
+    second = create_project(client, name="Other")
+    for project in (first, second):
+        assigned = client.post(
+            f"/api/projects/{project['id']}/resources",
+            json={"resource_id": ada["id"]},
+        )
+        assert assigned.status_code == 200, assigned.text
+
+    for project in (first, second):
+        row = client.get(f"/api/projects/{project['id']}").json()["assignments"][0]
+        assert row["project_count"] == 2
+        assert row["companies"] == [{"name": "ARM", "icon": None}]
+
+
 def test_status_reports(client):
     project = create_project(client, name="Nimbus")
     empty = client.get(f"/api/projects/{project['id']}/status-reports")
@@ -195,3 +220,29 @@ def test_labels_are_a_catalog(client):
     client.set_roles(["admin", "user"])
     assert client.delete(f"/api/tags/{first['id']}").status_code == 204
     assert client.get(f"/api/projects/{project['id']}").json()["tags"] == []
+
+
+def test_external_link(client):
+    project = create_project(client, name="Nimbus", external_url="https://example.com/docs")
+    assert project["external_url"] == "https://example.com/docs"
+    listed = client.get("/api/projects")
+    assert listed.status_code == 200
+    assert listed.json()[0]["external_url"] == "https://example.com/docs"
+    fetched = client.get(f"/api/projects/{project['id']}")
+    assert fetched.json()["external_url"] == "https://example.com/docs"
+
+    bare = client.patch(f"/api/projects/{project['id']}", json={"external_url": "example.com/board"})
+    assert bare.status_code == 200, bare.text
+    assert bare.json()["external_url"] == "https://example.com/board"
+
+    cleared = client.patch(f"/api/projects/{project['id']}", json={"external_url": ""})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["external_url"] is None
+    again = client.patch(f"/api/projects/{project['id']}", json={"external_url": "https://example.com/docs"})
+    assert again.status_code == 200
+    nulled = client.patch(f"/api/projects/{project['id']}", json={"external_url": None})
+    assert nulled.status_code == 200
+    assert nulled.json()["external_url"] is None
+
+    rejected = client.patch(f"/api/projects/{project['id']}", json={"external_url": "javascript:alert(1)"})
+    assert rejected.status_code == 422

@@ -1,28 +1,65 @@
 import { useEffect, useRef, useState } from 'react';
 import CompanyLabel from '../components/CompanyLabel.jsx';
 import {
-  createResource,
   deleteResource,
   listCompanies,
   listDepartments,
   listDesignations,
   listLocations,
   listResources,
-  updateResource,
 } from '../api.js';
-
-const emptyForm = {
-  name: '',
-  email: '',
-  department_id: '',
-  designation_id: '',
-  location: '',
-  company_ids: [],
-  resigned: false,
-};
+import ResourceFormDialog from './ResourceFormDialog.jsx';
 
 function projectCountLabel(count) {
   return `${count} ${count === 1 ? 'project' : 'projects'}`;
+}
+
+function peopleLabel(count) {
+  return `${count} ${count === 1 ? 'person' : 'people'}`;
+}
+
+function DepartmentSummary({ departments, counts, selectedId, resignedOnly, onSelect }) {
+  const items = departments
+    .map((department) => ({
+      id: department.id,
+      name: department.name,
+      count: counts[department.id] || 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const total = items.reduce((sum, item) => sum + item.count, 0);
+
+  return (
+    <section
+      className="dept-summary"
+      aria-label={resignedOnly ? 'Resigned people by department' : 'People by department'}
+    >
+      <button
+        type="button"
+        className={`dept-summary__item${selectedId === '' ? ' dept-summary__item--active' : ''}`}
+        aria-pressed={selectedId === ''}
+        onClick={() => onSelect('')}
+      >
+        <span className="dept-summary__count">{total}</span>
+        <span className="dept-summary__name">All departments</span>
+      </button>
+      {items.map((item) => {
+        const selected = selectedId === String(item.id);
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={`dept-summary__item${selected ? ' dept-summary__item--active' : ''}`}
+            aria-pressed={selected}
+            aria-label={`${item.name}, ${peopleLabel(item.count)}`}
+            onClick={() => onSelect(selected ? '' : String(item.id))}
+          >
+            <span className="dept-summary__count">{item.count}</span>
+            <span className="dept-summary__name">{item.name}</span>
+          </button>
+        );
+      })}
+    </section>
+  );
 }
 
 export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = false }) {
@@ -36,17 +73,15 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
   const [companyId, setCompanyId] = useState('');
   const [location, setLocation] = useState('');
   const [projectCount, setProjectCount] = useState('');
-  const [form, setForm] = useState(emptyForm);
-  const [editingId, setEditingId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingPerson, setEditingPerson] = useState(null);
   const [error, setError] = useState('');
-  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
+  const [departmentCounts, setDepartmentCounts] = useState(null);
   const requestId = useRef(0);
+  const summaryRequest = useRef(0);
   const copiedTimer = useRef(null);
-  const dialogRef = useRef(null);
-  const closingRef = useRef(false);
 
   async function refresh(next = {}) {
     const id = ++requestId.current;
@@ -71,21 +106,32 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
     }
   }
 
+  async function loadSummary() {
+    const id = ++summaryRequest.current;
+    try {
+      const people = await listResources({ resigned_only: resignedOnly });
+      if (id !== summaryRequest.current) return;
+      const counts = {};
+      for (const person of people) {
+        const deptId = person.department?.id;
+        if (deptId == null) continue;
+        counts[deptId] = (counts[deptId] || 0) + 1;
+      }
+      setDepartmentCounts(counts);
+    } catch (err) {
+      if (id !== summaryRequest.current) return;
+      setError(err.message);
+    }
+  }
+
+  function applyDepartment(value) {
+    setDepartmentId(value);
+    refresh({ departmentId: value });
+  }
+
   useEffect(() => () => {
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
   }, []);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (showForm && !dialog.open) {
-      dialog.showModal();
-    } else if (!showForm && dialog.open) {
-      closingRef.current = true;
-      dialog.close();
-      closingRef.current = false;
-    }
-  }, [showForm]);
 
   useEffect(() => {
     let active = true;
@@ -101,74 +147,31 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
         if (active) setError(err.message);
       });
     refresh();
+    loadSummary();
     return () => {
       active = false;
     };
   }, []);
 
+  function closeForm() {
+    setFormOpen(false);
+    setEditingPerson(null);
+  }
+
   function beginCreate() {
-    setEditingId(null);
-    setForm({
-      ...emptyForm,
-      department_id: departments[0] ? String(departments[0].id) : '',
-    });
-    setShowForm(true);
+    setEditingPerson(null);
+    setFormOpen(true);
     setError('');
-    setFormError('');
   }
 
   function beginEdit(row) {
-    setEditingId(row.id);
-    setForm({
-      name: row.name,
-      email: row.email,
-      department_id: String(row.department.id),
-      designation_id: row.designation ? String(row.designation.id) : '',
-      location: row.location || '',
-      company_ids: row.companies.map((company) => company.id),
-      resigned: Boolean(row.resigned),
-    });
-    setShowForm(true);
+    setEditingPerson(row);
+    setFormOpen(true);
     setError('');
-    setFormError('');
   }
 
-  function cancel() {
-    setShowForm(false);
-    setEditingId(null);
-    setForm(emptyForm);
-    setFormError('');
-  }
-
-  function onDialogCancel(event) {
-    event.preventDefault();
-  }
-
-  function onDialogClose() {
-    if (closingRef.current) return;
-    cancel();
-  }
-
-  async function onSubmit(event) {
-    event.preventDefault();
-    setFormError('');
-    const body = {
-      name: form.name,
-      email: form.email,
-      department_id: Number(form.department_id),
-      designation_id: form.designation_id ? Number(form.designation_id) : null,
-      location: form.location || null,
-      company_ids: form.company_ids,
-      resigned: form.resigned,
-    };
-    try {
-      if (editingId) await updateResource(editingId, body);
-      else await createResource(body);
-      cancel();
-      await refresh();
-    } catch (err) {
-      setFormError(err.message);
-    }
+  async function onPersonSaved() {
+    await Promise.all([refresh(), loadSummary()]);
   }
 
   async function copyEmail(row) {
@@ -188,8 +191,8 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
     setError('');
     try {
       await deleteResource(row.id);
-      if (editingId === row.id) cancel();
-      await refresh();
+      if (formOpen && editingPerson?.id === row.id) closeForm();
+      await Promise.all([refresh(), loadSummary()]);
     } catch (err) {
       setError(err.message);
     }
@@ -211,6 +214,15 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
         ) : null}
       </header>
       {error ? <p className="banner" role="alert">{error}</p> : null}
+      {departments.length > 0 && departmentCounts ? (
+        <DepartmentSummary
+          departments={departments}
+          counts={departmentCounts}
+          selectedId={departmentId}
+          resignedOnly={resignedOnly}
+          onSelect={applyDepartment}
+        />
+      ) : null}
       <div className="toolbar">
         <label className="search-field">
           <span className="sr-only">Search</span>
@@ -228,11 +240,7 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
           Department
           <select
             value={departmentId}
-            onChange={(event) => {
-              const value = event.target.value;
-              setDepartmentId(value);
-              refresh({ departmentId: value });
-            }}
+            onChange={(event) => applyDepartment(event.target.value)}
           >
             <option value="">All</option>
             {departments.map((row) => (
@@ -292,97 +300,17 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
       {canEdit && !resignedOnly && departments.length === 0 ? (
         <p className="empty">Add a department before adding a person.</p>
       ) : null}
-      {canEdit ? (
-        <dialog
-          ref={dialogRef}
-          className="dialog"
-          aria-labelledby="resource-dialog-title"
-          onCancel={onDialogCancel}
-          onClose={onDialogClose}
-        >
-          <form className="form-grid" onSubmit={onSubmit}>
-            <h2 id="resource-dialog-title" className="dialog-heading">{editingId ? 'Edit person' : 'Add person'}</h2>
-            {formError ? <p className="banner" role="alert">{formError}</p> : null}
-            <label>
-              Name
-              <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required />
-            </label>
-            <label>
-              Email
-              <input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} required />
-            </label>
-            <label>
-              Department
-              <select value={form.department_id} onChange={(event) => setForm((current) => ({ ...current, department_id: event.target.value }))} required>
-                <option value="" disabled>Select</option>
-                {departments.map((row) => (
-                  <option key={row.id} value={row.id}>{row.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Job title
-              <select value={form.designation_id} onChange={(event) => setForm((current) => ({ ...current, designation_id: event.target.value }))}>
-                <option value="">None</option>
-                {titles.map((row) => (
-                  <option key={row.id} value={row.id}>{row.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Location
-              <select value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}>
-                <option value="">Unset</option>
-                {locations.map((row) => (
-                  <option key={row.code} value={row.code}>{row.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Resigned
-              <span className="check-slot">
-                <input
-                  type="checkbox"
-                  checked={form.resigned}
-                  onChange={(event) => setForm((current) => ({ ...current, resigned: event.target.checked }))}
-                />
-              </span>
-            </label>
-            <fieldset className="check-group">
-              <legend>Onboarded</legend>
-              {companies.length === 0 ? (
-                <span className="muted">No companies yet.</span>
-              ) : (
-                <div className="check-list">
-                  {companies.map((company) => (
-                    <label key={company.id}>
-                      <input
-                        type="checkbox"
-                        checked={form.company_ids.includes(company.id)}
-                        onChange={() => {
-                          setForm((current) => {
-                            const selected = current.company_ids.includes(company.id);
-                            return {
-                              ...current,
-                              company_ids: selected
-                                ? current.company_ids.filter((id) => id !== company.id)
-                                : [...current.company_ids, company.id],
-                            };
-                          });
-                        }}
-                      />
-                      <CompanyLabel name={company.name} icon={company.icon} />
-                    </label>
-                  ))}
-                </div>
-              )}
-            </fieldset>
-            <div className="form-actions">
-              <button type="submit" className="btn btn--primary">{editingId ? 'Save' : 'Add person'}</button>
-              <button type="button" className="btn btn--ghost" onClick={cancel}>Cancel</button>
-            </div>
-          </form>
-        </dialog>
+      {canEdit && formOpen ? (
+        <ResourceFormDialog
+          key={editingPerson?.id ?? 'new'}
+          person={editingPerson}
+          departments={departments}
+          titles={titles}
+          companies={companies}
+          locations={locations}
+          onClose={closeForm}
+          onSaved={onPersonSaved}
+        />
       ) : null}
       {loading ? <p className="muted">Loading…</p> : rows.length === 0 ? (
         <p className="empty">No people match.</p>

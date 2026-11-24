@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { updateAssignment } from '../api.js';
+import CompanyLabel from '../components/CompanyLabel.jsx';
 
 export function userCountLabel(count) {
   const total = Number.isFinite(count) ? count : 0;
@@ -82,10 +83,20 @@ export default function ProjectUsersDialog({ project, canEdit, onClose, onUpdate
               {rows.map((row) => (
                 <tr key={row.resource_id}>
                   <td>
-                    <span className="name-cell">
-                      {row.name}
-                      {row.resigned ? <span className="flag">Resigned</span> : null}
-                    </span>
+                    <div className="user-identity">
+                      <span className="name-cell">
+                        {row.name}
+                        {row.resigned ? <span className="flag">Resigned</span> : null}
+                        {(row.companies ?? []).map((company) => (
+                          <CompanyLabel key={company.name} name={company.name} icon={company.icon} iconOnly />
+                        ))}
+                      </span>
+                      <span className="user-meta">
+                        {row.designation_name
+                          ? `${row.department_name} · ${row.designation_name}`
+                          : row.department_name}
+                      </span>
+                    </div>
                   </td>
                   <td>{row.project_role}</td>
                   <td>

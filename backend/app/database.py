@@ -44,6 +44,12 @@ def session_factory() -> sessionmaker[Session]:
 
 
 def get_db() -> Generator[Session, None, None]:
+    """Yield a session, then commit.
+
+    Callers must use ``Depends(get_db, scope="function")``. FastAPI's default
+    request scope runs this commit after the response is sent, so the screen
+    can refetch and still receive a company that was just deleted.
+    """
     db = session_factory()()
     try:
         yield db
@@ -147,6 +153,8 @@ def _ensure_project_workspace() -> None:
             statements.append(f"ALTER TABLE projects ADD COLUMN reports_with_pmo {boolean}")
         if "report_cadence_days" not in projects:
             statements.append("ALTER TABLE projects ADD COLUMN report_cadence_days INTEGER")
+        if "external_url" not in projects:
+            statements.append("ALTER TABLE projects ADD COLUMN external_url VARCHAR(2048)")
     assignments = _column_names("project_resources")
     if assignments is not None:
         if "utilization_percent" not in assignments:

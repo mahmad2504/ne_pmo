@@ -18,6 +18,7 @@ const emptyForm = {
   group_ids: [],
   cadence: '7',
   reports_with_pmo: true,
+  externalUrl: '',
   tags: [],
 };
 const emptyView = { name: '', description: '' };
@@ -29,6 +30,15 @@ function parseCadence(text) {
     return { error: 'Report cadence must be a whole number from 0 to 365, or blank for none.' };
   }
   return { value: Number(trimmed) };
+}
+
+function parseExternalUrl(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return { value: null };
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) && !/^https?:/i.test(trimmed)) {
+    return { error: 'External link must be an http or https address.' };
+  }
+  return { value: trimmed };
 }
 
 function ViewPicker({ groups, selectedIds, onToggle }) {
@@ -139,7 +149,7 @@ function ProjectRow({ row, canEdit, labelFor, onOpen, onOpenUsers, onArchive }) 
   return (
     <tr>
       <td>
-        <button type="button" className="link" onClick={() => onOpen(row.id)}>{row.name}</button>
+        <button type="button" className="link project-name" onClick={() => onOpen(row.id)}>{row.name}</button>
       </td>
       <td className="desc-cell" title={row.description || undefined}>
         {row.description ? <div className="desc-clamp">{row.description}</div> : <span className="muted">—</span>}
@@ -393,6 +403,11 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
       setFormError(parsed.error);
       return;
     }
+    const external = parseExternalUrl(form.externalUrl);
+    if (external.error) {
+      setFormError(external.error);
+      return;
+    }
     let groupIds = form.group_ids;
     if (openGroup && !resourceId && !groupIds.includes(openGroup.id)) {
       const projectName = form.name.trim() || 'this project';
@@ -408,6 +423,7 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
         group_ids: groupIds,
         report_cadence_days: parsed.value,
         reports_with_pmo: form.reports_with_pmo,
+        external_url: external.value,
         tags: form.tags,
       });
       setShowForm(false);
@@ -605,6 +621,14 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
                   placeholder="What this project covers"
                   value={form.description}
                   onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                />
+              </label>
+              <label>
+                External link
+                <input
+                  value={form.externalUrl}
+                  placeholder="https://example.com"
+                  onChange={(event) => setForm((current) => ({ ...current, externalUrl: event.target.value }))}
                 />
               </label>
             </div>

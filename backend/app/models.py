@@ -92,6 +92,7 @@ class Project(Base):
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reports_with_pmo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     report_cadence_days: Mapped[int | None] = mapped_column(Integer)
+    external_url: Mapped[str | None] = mapped_column(String(2048))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

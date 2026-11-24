@@ -4,8 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NE PM Tool</title>
-    <meta name="theme-color" content="#0f1419" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%235b9fd4'/></svg>" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <script>
+      (function () {
+        try {
+          var dark = localStorage.getItem('ne-pm-theme') === 'dark';
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#1b1e26' : '#f6f7f9');
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2330476b'/></svg>" />
   </head>
   <body>
     <div id="root"></div>

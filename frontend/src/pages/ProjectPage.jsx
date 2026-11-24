@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
+import CompanyLabel from '../components/CompanyLabel.jsx';
 import {
   archiveProject,
   assignResource,
@@ -7,7 +9,12 @@ import {
   deleteProject,
   deleteStatusReport,
   getProject,
+  getResource,
+  listCompanies,
+  listDepartments,
+  listDesignations,
   listLifecycle,
+  listLocations,
   listProjectGroups,
   listProjectRoles,
   listResources,
@@ -24,6 +31,7 @@ import {
 import AssignResourceForm from './AssignResourceForm.jsx';
 import ProjectReports from './ProjectReports.jsx';
 import RemoveResourceDialog from './RemoveResourceDialog.jsx';
+import ResourceFormDialog from './ResourceFormDialog.jsx';
 
 const REPORT_PAGE_SIZE = 5;
 
@@ -32,7 +40,17 @@ function snapshot(project) {
     name: project.name,
     description: project.description || '',
     cadence: project.report_cadence_days == null ? '' : String(project.report_cadence_days),
+    externalUrl: project.external_url || '',
   };
+}
+
+function parseExternalUrl(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return { value: null };
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) && !/^https?:/i.test(trimmed)) {
+    return { error: 'External link must be an http or https address.' };
+  }
+  return { value: trimmed };
 }
 
 function parseCadence(text) {
@@ -42,6 +60,17 @@ function parseCadence(text) {
     return { error: 'Report cadence must be a whole number from 0 to 365, or blank for none.' };
   }
   return { value: Number(trimmed) };
+}
+
+function projectCountLabel(count) {
+  return `${count} ${count === 1 ? 'project' : 'projects'}`;
+}
+
+function assignmentRank(row) {
+  if (row.resigned) return 3;
+  if (row.project_role === 'director') return 0;
+  if (row.project_role === 'lead') return 1;
+  return 2;
 }
 
 function utcDay(value) {
@@ -88,7 +117,7 @@ function FoldSection({ title, count, actionLabel, onAction, empty, isEmpty, defa
   );
 }
 
-export default function ProjectPage({ projectId, canEdit, onClose, backLabel, registerLeaveGuard }) {
+export default function ProjectPage({ projectId, canEdit, onClose, onOpenProjects, backLabel, registerLeaveGuard }) {
   const [project, setProject] = useState(null);
   const [form, setForm] = useState(null);
   const [people, setPeople] = useState([]);
@@ -104,6 +133,8 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
   const [removing, setRemoving] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState('');
+  const [catalogs, setCatalogs] = useState(null);
+  const [editingPerson, setEditingPerson] = useState(null);
   const [editingContribution, setEditingContribution] = useState(null);
   const [contributionBusy, setContributionBusy] = useState(false);
   const [contributionError, setContributionError] = useState('');
@@ -117,6 +148,7 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
   const savedRef = useRef(null);
   const draftRef = useRef(null);
   const reportDirtyRef = useRef(false);
+  const personRequest = useRef(0);
 
   const isDirty = useCallback(() => {
     if (reportDirtyRef.current) return true;
@@ -250,6 +282,25 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
     }
   }
 
+  async function commitExternalUrl(event) {
+    const externalUrl = event.target.value;
+    draftRef.current = { ...draftRef.current, externalUrl };
+    const parsed = parseExternalUrl(externalUrl);
+    if (parsed.error) {
+      setError(parsed.error);
+      return;
+    }
+    if ((parsed.value ?? '') === (savedRef.current?.externalUrl ?? '')) {
+      setError('');
+      return;
+    }
+    try {
+      await savePatch({ external_url: parsed.value });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function commitCadence(event) {
     const cadence = event.target.value;
     draftRef.current = { ...draftRef.current, cadence };
@@ -352,6 +403,46 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
     } finally {
       setAssignBusy(false);
     }
+  }
+
+  async function openPerson(row) {
+    const request = ++personRequest.current;
+    setError('');
+    try {
+      const cached = people.find((person) => person.id === row.resource_id) ?? null;
+      const personPromise = cached ? Promise.resolve(cached) : getResource(row.resource_id);
+      const catalogPromise = catalogs
+        ? Promise.resolve(catalogs)
+        : Promise.all([listDepartments(), listDesignations(), listCompanies(), listLocations()])
+          .then(([departmentRows, titleRows, companyRows, locationRows]) => ({
+            departments: departmentRows,
+            titles: titleRows,
+            companies: companyRows,
+            locations: locationRows,
+          }));
+      const [person, catalog] = await Promise.all([personPromise, catalogPromise]);
+      if (request !== personRequest.current) return;
+      setCatalogs(catalog);
+      setEditingPerson(person);
+    } catch (err) {
+      if (request !== personRequest.current) return;
+      setError(err.message);
+    }
+  }
+
+  async function onPersonSaved(saved) {
+    const detail = await getProject(projectId);
+    setProject(detail);
+    setPeople((current) => {
+      const index = current.findIndex((person) => person.id === saved.id);
+      if (saved.resigned) {
+        return index === -1 ? current : current.filter((person) => person.id !== saved.id);
+      }
+      if (index === -1) return [...current, saved];
+      const next = current.slice();
+      next[index] = saved;
+      return next;
+    });
   }
 
   async function onRoleChange(resourceId, role) {
@@ -574,6 +665,33 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
               onBlur={commitDescription}
             />
           </label>
+          <label>
+            External link
+            <span className="external-link">
+              <input
+                value={form.externalUrl}
+                disabled={!canEdit}
+                placeholder="https://example.com"
+                onChange={(event) => {
+                  const externalUrl = event.target.value;
+                  draftRef.current = { ...draftRef.current, externalUrl };
+                  setForm((current) => ({ ...current, externalUrl }));
+                }}
+                onBlur={commitExternalUrl}
+              />
+              {project.external_url ? (
+                <a
+                  className="icon-btn external-link__open"
+                  href={project.external_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open external link"
+                >
+                  <ExternalLink size={16} aria-hidden="true" />
+                </a>
+              ) : null}
+            </span>
+          </label>
         </div>
         <div className="split-panels">
           <div className="project-details__choice">
@@ -676,11 +794,13 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
         onAction={() => { setAssignError(''); setAdding(true); }}
         empty="No one is assigned yet."
       >
-        <table className="data">
+        <table className="data people-table">
           <thead>
             <tr>
               <th>Name</th>
               <th>Department</th>
+              <th>Onboarded</th>
+              <th>Projects</th>
               <th>Utilization</th>
               <th>Project role</th>
               {canEdit ? <th /> : null}
@@ -688,16 +808,44 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
           </thead>
           <tbody>
             {[...project.assignments]
-              .sort((a, b) => Number(Boolean(a.resigned)) - Number(Boolean(b.resigned)))
+              .sort((a, b) => assignmentRank(a) - assignmentRank(b))
               .map((row) => (
               <tr key={row.resource_id} className={row.resigned ? 'data-row--resigned' : undefined}>
                 <td>
                   <span className="name-cell">
-                    {row.name}
+                    {canEdit ? (
+                      <button type="button" className="link" onClick={() => openPerson(row)}>
+                        {row.name}
+                      </button>
+                    ) : row.name}
                     {row.resigned ? <span className="flag">Resigned</span> : null}
                   </span>
                 </td>
                 <td>{row.department_name}</td>
+                <td className="companies-cell">{row.companies.length ? row.companies.map((company) => (
+                  <CompanyLabel key={company.name} name={company.name} icon={company.icon} iconOnly />
+                )) : <span className="muted">—</span>}</td>
+                <td>
+                  {row.project_count === 0 ? <span className="muted">—</span> : (
+                    <button
+                      type="button"
+                      className="project-count"
+                      title={projectCountLabel(row.project_count)}
+                      aria-label={projectCountLabel(row.project_count)}
+                      onClick={() => onOpenProjects(row.resource_id)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          fill="currentColor"
+                          fillRule="evenodd"
+                          d="M9.75 3a2.25 2.25 0 0 0-2.25 2.25V6H3.75A2.25 2.25 0 0 0 1.5 8.25v9A2.25 2.25 0 0 0 3.75 19.5h16.5a2.25 2.25 0 0 0 2.25-2.25v-9A2.25 2.25 0 0 0 20.25 6h-3.75v-.75A2.25 2.25 0 0 0 14.25 3h-4.5Zm0 2.25a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 .75.75V6h-6v-.75Z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span>{row.project_count}</span>
+                    </button>
+                  )}
+                </td>
                 <td>
                   {canEdit && !row.resigned ? (
                     <input
@@ -783,6 +931,18 @@ export default function ProjectPage({ projectId, canEdit, onClose, backLabel, re
         }}
       />
 
+      {editingPerson && catalogs ? (
+        <ResourceFormDialog
+          key={editingPerson.id}
+          person={editingPerson}
+          departments={catalogs.departments}
+          titles={catalogs.titles}
+          companies={catalogs.companies}
+          locations={catalogs.locations}
+          onClose={() => setEditingPerson(null)}
+          onSaved={onPersonSaved}
+        />
+      ) : null}
       {adding ? (
         <AssignResourceForm
           projectName={project.name}

@@ -19,7 +19,7 @@ def list_resources(
     include_resigned: bool = False,
     resigned_only: bool = False,
     project_count: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return service.list_resources(
         db,
@@ -34,23 +34,23 @@ def list_resources(
 
 
 @router.get("/{resource_id}", response_model=ResourceOut, dependencies=[Depends(require_reader)])
-def get_resource(resource_id: int, db: Session = Depends(get_db)):
+def get_resource(resource_id: int, db: Session = Depends(get_db, scope="function")):
     return service.get_resource(db, resource_id)
 
 
 @router.post("", status_code=201, response_model=ResourceOut, dependencies=[Depends(require_admin)])
-def create_resource(body: ResourceWrite, response: Response, db: Session = Depends(get_db)):
+def create_resource(body: ResourceWrite, response: Response, db: Session = Depends(get_db, scope="function")):
     payload = service.create_resource(db, body)
     response.headers["Location"] = f"/api/resources/{payload['id']}"
     return payload
 
 
 @router.patch("/{resource_id}", response_model=ResourceOut, dependencies=[Depends(require_admin)])
-def patch_resource(resource_id: int, body: ResourcePatch, db: Session = Depends(get_db)):
+def patch_resource(resource_id: int, body: ResourcePatch, db: Session = Depends(get_db, scope="function")):
     return service.patch_resource(db, resource_id, body)
 
 
 @router.delete("/{resource_id}", dependencies=[Depends(require_admin)])
-def delete_resource(resource_id: int, db: Session = Depends(get_db)):
+def delete_resource(resource_id: int, db: Session = Depends(get_db, scope="function")):
     service.delete_resource(db, resource_id)
     return RawResponse(status_code=204)

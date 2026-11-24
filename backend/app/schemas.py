@@ -6,7 +6,7 @@ from pydantic.functional_serializers import PlainSerializer
 
 from app.clock import iso
 from app.locations import LOCATIONS
-from app.normalize import blank_to_none, normalize_location, normalize_tags
+from app.normalize import blank_to_none, normalize_external_url, normalize_location, normalize_tags
 from app.report_html import clean_report_body
 from app.roles import Lifecycle, ProjectRole, ReportFlag
 
@@ -495,6 +495,7 @@ class ProjectWrite(APIModel):
     group_ids: list[int] = Field(default_factory=list)
     report_cadence_days: int | None = Field(default=None, ge=0, le=365)
     reports_with_pmo: bool = False
+    external_url: str | None = None
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("name", mode="before")
@@ -506,6 +507,11 @@ class ProjectWrite(APIModel):
     @classmethod
     def description_clean(cls, value):
         return blank_to_none(value)
+
+    @field_validator("external_url", mode="before")
+    @classmethod
+    def external_url_clean(cls, value):
+        return normalize_external_url(value)
 
     @field_validator("group_ids", mode="before")
     @classmethod
@@ -526,6 +532,7 @@ class ProjectPatch(APIModel):
     status: Lifecycle | None = None
     reports_with_pmo: bool | None = None
     report_cadence_days: int | None = Field(default=None, ge=0, le=365)
+    external_url: str | None = None
     tags: list[str] | None = None
 
     @field_validator("name", mode="before")
@@ -541,6 +548,11 @@ class ProjectPatch(APIModel):
         if value is None:
             return None
         return blank_to_none(value)
+
+    @field_validator("external_url", mode="before")
+    @classmethod
+    def external_url_clean(cls, value):
+        return normalize_external_url(value)
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -618,6 +630,7 @@ class ProjectAssignment(APIModel):
     project_role: str
     utilization_percent: int
     onboarded: bool
+    project_count: int
     started_at: Utc
 
 
@@ -644,6 +657,7 @@ class ProjectListItem(APIModel):
     archived: bool
     reports_with_pmo: bool
     report_cadence_days: int | None
+    external_url: str | None
     tags: list[TagRef]
     assignment_count: int
     resource_count: int

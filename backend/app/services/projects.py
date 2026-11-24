@@ -71,6 +71,17 @@ def _require_resource(db: Session, resource_id: int) -> Resource:
     return row
 
 
+def _resource_project_counts(db: Session, resource_ids: list[int]) -> dict[int, int]:
+    if not resource_ids:
+        return {}
+    rows = db.execute(
+        select(ProjectResource.resource_id, func.count())
+        .where(ProjectResource.resource_id.in_(resource_ids))
+        .group_by(ProjectResource.resource_id)
+    ).all()
+    return {resource_id: int(count) for resource_id, count in rows}
+
+
 def _assignment_rows(db: Session, project_id: int) -> list[ProjectResource]:
     return list(
         db.scalars(
@@ -234,6 +245,9 @@ def _payload(
                 "started_at": link.started_at,
             }
         )
+    counts = _resource_project_counts(db, [item["resource_id"] for item in assignments])
+    for item in assignments:
+        item["project_count"] = counts.get(item["resource_id"], 0)
     if groups is None:
         groups = _group_map(db, [row.id]).get(row.id, [])
     if tags is None:
@@ -251,6 +265,7 @@ def _payload(
         "archived": row.archived,
         "reports_with_pmo": row.reports_with_pmo,
         "report_cadence_days": row.report_cadence_days,
+        "external_url": row.external_url,
         "tags": tags,
         "assignment_count": active_count,
         "resource_count": active_count,
@@ -279,6 +294,7 @@ def _list_payload(
         "archived": row.archived,
         "reports_with_pmo": row.reports_with_pmo,
         "report_cadence_days": row.report_cadence_days,
+        "external_url": row.external_url,
         "tags": tags,
         "assignment_count": assignment_count,
         "resource_count": assignment_count,
@@ -371,6 +387,7 @@ def create_project(db: Session, body: ProjectWrite) -> dict:
         status=body.status.value,
         reports_with_pmo=body.reports_with_pmo,
         report_cadence_days=body.report_cadence_days,
+        external_url=body.external_url,
         created_at=now,
         updated_at=now,
     )
@@ -398,6 +415,8 @@ def patch_project(db: Session, project_id: int, body: ProjectPatch) -> dict:
         row.reports_with_pmo = body.reports_with_pmo
     if "report_cadence_days" in fields:
         row.report_cadence_days = body.report_cadence_days
+    if "external_url" in fields:
+        row.external_url = body.external_url
     if "tags" in fields and body.tags is not None:
         set_project_tags(db, row.id, body.tags)
     row.updated_at = utcnow()

@@ -236,6 +236,7 @@ export default function App() {
           registerLeaveGuard={registerLeaveGuard}
           backLabel={route.from === 'archive' ? 'Archive' : 'Projects'}
           onClose={() => go(route.from === 'archive' ? '/archive' : (route.resourceId ? `/?resource=${route.resourceId}` : `/${groupQuery(route.group)}`))}
+          onOpenProjects={(id) => go(`/?resource=${id}`)}
         />
       ) : route.view === 'archive' ? (
         <ArchivePage canEdit={canEdit} onOpenProject={(id) => go(`/projects/${id}?from=archive`)} />

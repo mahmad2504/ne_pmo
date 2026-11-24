@@ -119,7 +119,7 @@ export default function EditViewPage({ viewId, onGroupsChanged, onClose, onDelet
   }
 
   return (
-    <>
+    <div className="view-edit-page">
       <header className="main-header">
         <div>
           <button type="button" className="link link--back" onClick={onClose}>Projects</button>
@@ -130,7 +130,7 @@ export default function EditViewPage({ viewId, onGroupsChanged, onClose, onDelet
           <button type="button" className="btn btn--danger" onClick={onDelete} disabled={saving}>Delete view</button>
         </div>
       </header>
-      <form className="panel form-grid" onSubmit={onSave}>
+      <form className="panel form-grid view-edit" onSubmit={onSave}>
         {error ? <p className="banner field-wide" role="alert">{error}</p> : null}
         <label>
           View name
@@ -151,8 +151,11 @@ export default function EditViewPage({ viewId, onGroupsChanged, onClose, onDelet
                     checked={selected.has(project.id)}
                     onChange={() => toggleProject(project.id)}
                   />
-                  {project.name}
+                  <span className="check-name">{project.name}</span>
                   {project.archived ? <span className="flag">Archived</span> : null}
+                  {project.description ? (
+                    <span className="check-desc" title={project.description}>{project.description}</span>
+                  ) : null}
                 </label>
               ))}
             </div>
@@ -163,6 +166,6 @@ export default function EditViewPage({ viewId, onGroupsChanged, onClose, onDelet
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
         </div>
       </form>
-    </>
+    </div>
   );
 }

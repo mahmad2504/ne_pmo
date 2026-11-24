@@ -24,7 +24,7 @@ async function api(path, options = {}) {
     ...(await authHeader()),
     ...options.headers,
   };
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, { ...options, headers, cache: 'no-store' });
   if (response.status === 204) return null;
   const text = await response.text();
   let payload = null;

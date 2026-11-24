@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -8,7 +9,12 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(readFileSync(path.join(root, 'keycloak.config.json'), 'utf8'));
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(root, 'src'),
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

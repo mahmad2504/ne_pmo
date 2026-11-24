@@ -63,39 +63,43 @@ export default function RemoveResourceDialog({ assignment, projectName, busy, er
     <div className="modal-backdrop" onMouseDown={handleBackdrop}>
       <form className="modal" onSubmit={handleSubmit} role="dialog" aria-modal="true" aria-labelledby="remove-resource-title">
         <div className="modal__header">
-          <h2 id="remove-resource-title">Remove {assignment.name}</h2>
+          <div className="modal__heading">
+            <h2 id="remove-resource-title">Remove {assignment.name}</h2>
+            <p className="modal__hint">From {projectName}.</p>
+          </div>
           <button type="button" className="icon-btn" onClick={onCancel} disabled={busy} aria-label="Close">×</button>
         </div>
-        <p className="modal__hint">Remove {assignment.name} from {projectName}.</p>
         <div className="modal__form">
           <div className="remove-choices">
-            <label className="check-field">
+            <label className={mode === 'none' ? 'remove-choice remove-choice--selected' : 'remove-choice'}>
               <input type="radio" name="remove-mode" checked={mode === 'none'} disabled={busy} onChange={() => choose('none')} />
-              Remove with no record of contribution
+              <span>Remove with no record of contribution</span>
             </label>
-            <label className="check-field">
-              <input type="radio" name="remove-mode" checked={mode === 'record'} disabled={busy} onChange={() => choose('record')} />
-              Record as a project contributor
-            </label>
-          </div>
-          {mode === 'record' ? (
-            <>
-              <div className="remove-dates">
-                <label>
-                  From
-                  <input type="date" value={fromDate} disabled={busy} required onChange={(event) => setFromDate(event.target.value)} />
-                </label>
-                <label>
-                  To
-                  <input type="date" value={toDate} disabled={busy} required onChange={(event) => setToDate(event.target.value)} />
-                </label>
-              </div>
-              <label>
-                Contribution highlights
-                <textarea value={highlights} rows={3} maxLength={4000} disabled={busy} placeholder="Optional" onChange={(event) => setHighlights(event.target.value)} />
+            <div className="remove-record">
+              <label className={mode === 'record' ? 'remove-choice remove-choice--selected' : 'remove-choice'}>
+                <input type="radio" name="remove-mode" checked={mode === 'record'} disabled={busy} onChange={() => choose('record')} />
+                <span>Record as a project contributor</span>
               </label>
-            </>
-          ) : null}
+              {mode === 'record' ? (
+                <div className="remove-choice__details">
+                  <div className="remove-dates">
+                    <label>
+                      From
+                      <input type="date" value={fromDate} disabled={busy} required onChange={(event) => setFromDate(event.target.value)} />
+                    </label>
+                    <label>
+                      To
+                      <input type="date" value={toDate} disabled={busy} required onChange={(event) => setToDate(event.target.value)} />
+                    </label>
+                  </div>
+                  <label>
+                    Contribution highlights
+                    <textarea value={highlights} rows={3} maxLength={4000} disabled={busy} placeholder="Optional" onChange={(event) => setHighlights(event.target.value)} />
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          </div>
           {shownError ? <p className="modal__error" role="alert">{shownError}</p> : null}
         </div>
         <div className="modal__footer">

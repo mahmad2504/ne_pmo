@@ -43,16 +43,21 @@ export default function CatalogPage({ title, subtitle, noun, plural, emptyLabel,
   const [loading, setLoading] = useState(true);
   const dialogRef = useRef(null);
   const closingRef = useRef(false);
+  const requestId = useRef(0);
 
-  async function refresh() {
-    setLoading(true);
+  async function refresh({ silent = false, withoutId = null } = {}) {
+    const id = ++requestId.current;
+    if (!silent) setLoading(true);
     setError('');
     try {
-      setRows(await load());
+      const next = await load();
+      if (id !== requestId.current) return;
+      setRows(withoutId == null ? next : next.filter((item) => item.id !== withoutId));
     } catch (err) {
+      if (id !== requestId.current) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (id === requestId.current && !silent) setLoading(false);
     }
   }
 
@@ -142,7 +147,8 @@ export default function CatalogPage({ title, subtitle, noun, plural, emptyLabel,
     try {
       await remove(row.id);
       if (editingId === row.id) cancel();
-      await refresh();
+      setRows((current) => current.filter((item) => item.id !== row.id));
+      await refresh({ silent: true, withoutId: row.id });
     } catch (err) {
       setError(err.message);
     }
