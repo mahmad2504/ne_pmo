@@ -350,7 +350,7 @@ export default function ResourcesPage({ canEdit, onOpenProjects, resignedOnly = 
                   ? <span className="clip" title={row.designation.name}>{row.designation.name}</span>
                   : <span className="muted">—</span>}</td>
                 <td className="companies-cell">{row.companies.length ? row.companies.map((company) => (
-                  <CompanyLabel key={company.id} name={company.name} icon={company.icon} iconOnly />
+                  <CompanyLabel key={company.id} name={company.name} icon={company.icon} email={company.email} iconOnly />
                 )) : <span className="muted">—</span>}</td>
                 <td>{row.location || <span className="muted">—</span>}</td>
                 <td>

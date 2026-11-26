@@ -157,7 +157,7 @@ def test_assignment_lists_companies_and_project_count(client):
     for project in (first, second):
         row = client.get(f"/api/projects/{project['id']}").json()["assignments"][0]
         assert row["project_count"] == 2
-        assert row["companies"] == [{"name": "ARM", "icon": None}]
+        assert row["companies"] == [{"name": "ARM", "icon": None, "email": None}]
 
 
 def test_status_reports(client):

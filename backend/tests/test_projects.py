@@ -335,3 +335,198 @@ def test_multi_project_filter_keeps_people_on_more_than_one_project(client):
 
     invalid = client.get("/api/resources", params={"project_count": "many"})
     assert invalid.status_code == 422
+
+
+def _group_by_name(payload):
+    return {row["name"]: row for row in payload["groups"]}
+
+
+def test_a_view_can_group_projects_into_sections(client):
+    alpha = create_project(client, name="Alpha")
+    beta = create_project(client, name="Beta")
+    chips = client.post("/api/project-groups", json={"name": "Chips"}).json()
+    radio = client.post("/api/project-groups", json={"name": "Radio"}).json()
+    placed = client.put(
+        f"/api/projects/{alpha['id']}/groups",
+        json={"group_ids": [chips["id"], radio["id"]]},
+    )
+    assert placed.status_code == 200
+
+    assert client.post("/api/project-groups/9999/sections", json={"name": "Bring-up"}).status_code == 404
+
+    first = client.post(f"/api/project-groups/{chips['id']}/sections", json={"name": "  Bring-up  "})
+    assert first.status_code == 201, first.text
+    bringup = first.json()
+    assert bringup["name"] == "Bring-up"
+    assert bringup["group_id"] == chips["id"]
+    assert bringup["position"] == 0
+
+    duplicate = client.post(f"/api/project-groups/{chips['id']}/sections", json={"name": "bring-up"})
+    assert duplicate.status_code == 409
+
+    other_view = client.post(f"/api/project-groups/{radio['id']}/sections", json={"name": "Bring-up"})
+    assert other_view.status_code == 201, other_view.text
+    radio_section = other_view.json()
+
+    second = client.post(f"/api/project-groups/{chips['id']}/sections", json={"name": "Tapeout"})
+    assert second.status_code == 201, second.text
+    tapeout = second.json()
+    assert tapeout["position"] == 1
+    listed = client.get(f"/api/project-groups/{chips['id']}/sections")
+    assert [row["name"] for row in listed.json()] == ["Bring-up", "Tapeout"]
+
+    moved = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": bringup["id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    groups = _group_by_name(moved.json())
+    assert groups["Chips"]["section_id"] == bringup["id"]
+    assert groups["Chips"]["section_name"] == "Bring-up"
+    assert groups["Radio"]["section_id"] is None
+    assert groups["Radio"]["section_name"] is None
+
+    kept = client.put(
+        f"/api/projects/{alpha['id']}/groups",
+        json={"group_ids": [radio["id"], chips["id"]]},
+    )
+    assert kept.status_code == 200
+    assert _group_by_name(kept.json())["Chips"]["section_id"] == bringup["id"]
+
+    in_chips = client.get("/api/projects", params={"group_id": chips["id"]})
+    listed_groups = _group_by_name(in_chips.json()[0])
+    assert listed_groups["Chips"]["section_name"] == "Bring-up"
+    assert listed_groups["Radio"]["section_id"] is None
+
+    foreign = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": radio_section["id"]},
+    )
+    assert foreign.status_code == 404
+
+    shifted = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": tapeout["id"]},
+    )
+    assert shifted.status_code == 200, shifted.text
+    assert _group_by_name(shifted.json())["Chips"]["section_name"] == "Tapeout"
+
+    cleared = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert _group_by_name(cleared.json())["Chips"]["section_id"] is None
+
+    restored = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": bringup["id"]},
+    )
+    assert restored.status_code == 200
+    assert client.delete(f"/api/project-groups/{chips['id']}/sections/{bringup['id']}").status_code == 204
+    after = client.get(f"/api/projects/{alpha['id']}")
+    assert after.status_code == 200
+    assert {row["name"] for row in after.json()["groups"]} == {"Chips", "Radio"}
+    assert _group_by_name(after.json())["Chips"]["section_id"] is None
+    remaining = client.get(f"/api/project-groups/{chips['id']}/sections")
+    assert [row["name"] for row in remaining.json()] == ["Tapeout"]
+
+    renamed = client.patch(
+        f"/api/project-groups/{chips['id']}/sections/{tapeout['id']}",
+        json={"name": "Silicon"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Silicon"
+    assert client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": 9999},
+    ).status_code == 404
+    assert client.patch(
+        f"/api/projects/{beta['id']}/groups/{chips['id']}",
+        json={"section_id": tapeout["id"]},
+    ).status_code == 404
+
+    client.set_roles(["user"])
+    assert client.get(f"/api/project-groups/{chips['id']}/sections").status_code == 200
+    assert client.post(
+        f"/api/project-groups/{chips['id']}/sections",
+        json={"name": "Nope"},
+    ).status_code == 403
+    forbidden = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": None},
+    )
+    assert forbidden.status_code == 403
+
+
+def test_all_sections_are_separate_from_view_sections(client):
+    alpha = create_project(client, name="Alpha")
+    chips = client.post("/api/project-groups", json={"name": "Chips"}).json()
+    view_section = client.post(f"/api/project-groups/{chips['id']}/sections", json={"name": "Bring-up"})
+    assert view_section.status_code == 201, view_section.text
+    placed = client.put(f"/api/projects/{alpha['id']}/groups", json={"group_ids": [chips["id"]]})
+    assert placed.status_code == 200
+    in_view = client.patch(
+        f"/api/projects/{alpha['id']}/groups/{chips['id']}",
+        json={"section_id": view_section.json()["id"]},
+    )
+    assert in_view.status_code == 200
+
+    first = client.post("/api/project-sections", json={"name": "  Bring-up  "})
+    assert first.status_code == 201, first.text
+    active = first.json()
+    assert active["name"] == "Bring-up"
+    assert active["position"] == 0
+    assert client.post("/api/project-sections", json={"name": "bring-up"}).status_code == 409
+
+    second = client.post("/api/project-sections", json={"name": "Hold"})
+    assert second.status_code == 201, second.text
+    hold = second.json()
+    assert hold["position"] == 1
+    listed = client.get("/api/project-sections")
+    assert [row["name"] for row in listed.json()] == ["Bring-up", "Hold"]
+
+    moved = client.patch(f"/api/projects/{alpha['id']}/section", json={"section_id": active["id"]})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["section_id"] == active["id"]
+    assert moved.json()["section_name"] == "Bring-up"
+    chips_group = next(row for row in moved.json()["groups"] if row["name"] == "Chips")
+    assert chips_group["section_id"] == view_section.json()["id"]
+    assert chips_group["section_name"] == "Bring-up"
+
+    on_all = client.get("/api/projects")
+    listed_alpha = next(row for row in on_all.json() if row["name"] == "Alpha")
+    assert listed_alpha["section_name"] == "Bring-up"
+
+    shifted = client.patch(f"/api/projects/{alpha['id']}/section", json={"section_id": hold["id"]})
+    assert shifted.status_code == 200, shifted.text
+    assert shifted.json()["section_name"] == "Hold"
+    still_view = next(row for row in shifted.json()["groups"] if row["name"] == "Chips")
+    assert still_view["section_name"] == "Bring-up"
+
+    cleared = client.patch(f"/api/projects/{alpha['id']}/section", json={"section_id": None})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["section_id"] is None
+    assert cleared.json()["section_name"] is None
+
+    restored = client.patch(f"/api/projects/{alpha['id']}/section", json={"section_id": active["id"]})
+    assert restored.status_code == 200
+    assert client.delete(f"/api/project-sections/{active['id']}").status_code == 204
+    after = client.get(f"/api/projects/{alpha['id']}")
+    assert after.status_code == 200
+    assert after.json()["section_id"] is None
+    assert next(row for row in after.json()["groups"] if row["name"] == "Chips")["section_name"] == "Bring-up"
+    assert [row["name"] for row in client.get("/api/project-sections").json()] == ["Hold"]
+
+    assert client.patch(
+        f"/api/projects/{alpha['id']}/section",
+        json={"section_id": 9999},
+    ).status_code == 404
+
+    client.set_roles(["user"])
+    assert client.get("/api/project-sections").status_code == 200
+    assert client.post("/api/project-sections", json={"name": "Nope"}).status_code == 403
+    assert client.patch(
+        f"/api/projects/{alpha['id']}/section",
+        json={"section_id": None},
+    ).status_code == 403

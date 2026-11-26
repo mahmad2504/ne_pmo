@@ -176,6 +176,67 @@ def _ensure_project_workspace() -> None:
             )
 
 
+def _ensure_view_sections() -> None:
+    from sqlalchemy import inspect, text
+
+    columns = _column_names("project_group_members")
+    if columns is None:
+        return
+    engine = get_engine()
+    if "section_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE project_group_members "
+                    "ADD COLUMN section_id INTEGER REFERENCES project_group_sections(id) ON DELETE SET NULL"
+                )
+            )
+    indexes = {index["name"] for index in inspect(engine).get_indexes("project_group_members")}
+    if "ix_project_group_members_section_id" not in indexes:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_project_group_members_section_id "
+                    "ON project_group_members (section_id)"
+                )
+            )
+
+
+def _ensure_all_sections() -> None:
+    from sqlalchemy import inspect, text
+
+    columns = _column_names("projects")
+    if columns is None:
+        return
+    engine = get_engine()
+    if "section_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE projects "
+                    "ADD COLUMN section_id INTEGER REFERENCES project_sections(id) ON DELETE SET NULL"
+                )
+            )
+    indexes = {index["name"] for index in inspect(engine).get_indexes("projects")}
+    if "ix_projects_section_id" not in indexes:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_projects_section_id ON projects (section_id)"
+                )
+            )
+
+
+def _ensure_resource_company_email() -> None:
+    from sqlalchemy import text
+
+    columns = _column_names("resource_companies")
+    if columns is None or "email" in columns:
+        return
+    with get_engine().begin() as connection:
+        connection.execute(text("ALTER TABLE resource_companies ADD COLUMN email VARCHAR(255)"))
+
+
 def _ensure_resource_resigned() -> None:
     from sqlalchemy import text
 
@@ -197,5 +258,8 @@ def init_db() -> None:
     Base.metadata.create_all(get_engine())
     _ensure_company_icon()
     _ensure_project_workspace()
+    _ensure_view_sections()
+    _ensure_all_sections()
     _ensure_resource_resigned()
+    _ensure_resource_company_email()
     _seed_companies()

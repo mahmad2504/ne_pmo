@@ -3,11 +3,20 @@ import {
   archiveProject,
   createProject,
   createProjectGroup,
+  createAllSection,
+  createProjectSection,
+  deleteAllSection,
+  deleteProjectSection,
   getProject,
   getResource,
+  listAllSections,
   listLifecycle,
+  listProjectSections,
   listProjects,
   listTags,
+  setAllSection,
+  setProjectSection,
+  updateProjectSection,
 } from '../api.js';
 import ProjectUsersDialog, { UsersButton } from './ProjectUsersDialog.jsx';
 
@@ -22,6 +31,120 @@ const emptyForm = {
   tags: [],
 };
 const emptyView = { name: '', description: '' };
+const emptySection = { name: '', id: null };
+
+function sectionIdOf(row, viewId, knownIds) {
+  const membership = (row.groups || []).find((item) => item.id === viewId);
+  const sectionId = membership?.section_id ?? null;
+  if (sectionId == null || (knownIds && !knownIds.has(sectionId))) return null;
+  return sectionId;
+}
+
+function withSection(row, viewId, section) {
+  return {
+    ...row,
+    groups: (row.groups || []).map((item) => (
+      item.id === viewId
+        ? { ...item, section_id: section ? section.id : null, section_name: section ? section.name : null }
+        : item
+    )),
+  };
+}
+
+function placedSectionId(row, viewId, knownIds) {
+  if (viewId) return sectionIdOf(row, viewId, knownIds);
+  const sectionId = row.section_id ?? null;
+  if (sectionId == null || (knownIds && !knownIds.has(sectionId))) return null;
+  return sectionId;
+}
+
+function withPlacement(row, viewId, section) {
+  if (viewId) return withSection(row, viewId, section);
+  return {
+    ...row,
+    section_id: section ? section.id : null,
+    section_name: section ? section.name : null,
+  };
+}
+
+function DragHandle({ name, onDragStart, onDragEnd }) {
+  return (
+    <div
+      className="drag-handle"
+      role="button"
+      tabIndex={0}
+      draggable
+      aria-label={`Move ${name}`}
+      title="Drag to a section"
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="9" cy="6" r="1.4" fill="currentColor" />
+        <circle cx="15" cy="6" r="1.4" fill="currentColor" />
+        <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+        <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+        <circle cx="9" cy="18" r="1.4" fill="currentColor" />
+        <circle cx="15" cy="18" r="1.4" fill="currentColor" />
+      </svg>
+    </div>
+  );
+}
+
+function SectionGroup({
+  section,
+  title,
+  rows,
+  columnCount,
+  canEdit,
+  dropOver,
+  onDragOver,
+  onDrop,
+  onRename,
+  onDelete,
+  renderProject,
+}) {
+  return (
+    <>
+      <SectionBand
+        title={title || section.name}
+        columnCount={columnCount}
+        dropOver={dropOver}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onRename={canEdit && section ? onRename : null}
+        onDelete={canEdit && section ? onDelete : null}
+      />
+      {rows.map((row) => renderProject(row))}
+    </>
+  );
+}
+
+function SectionBand({ title, columnCount, dropOver, onDragOver, onDrop, onRename, onDelete }) {
+  return (
+    <tr
+      className={dropOver ? 'section-band section-band--over' : 'section-band'}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <th className="section-band" colSpan={columnCount} scope="rowgroup">
+        <div className="section-band__bar">
+          <span className="section-band__name">{title}</span>
+          {onRename || onDelete ? (
+            <span className="section-band__actions">
+              {onRename ? (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={onRename}>Rename</button>
+              ) : null}
+              {onDelete ? (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={onDelete}>Delete</button>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+      </th>
+    </tr>
+  );
+}
 
 function parseCadence(text) {
   const trimmed = String(text ?? '').trim();
@@ -145,9 +268,18 @@ function LabelPicker({ labels, selectedNames, onToggle }) {
   );
 }
 
-function ProjectRow({ row, canEdit, labelFor, onOpen, onOpenUsers, onArchive }) {
+function ProjectRow({ row, canEdit, canArrange, labelFor, onOpen, onOpenUsers, onArchive, onDragStart, onDragEnd }) {
   return (
     <tr>
+      {canArrange ? (
+        <td className="drag-col">
+          <DragHandle
+            name={row.name}
+            onDragStart={(event) => onDragStart(event, row.id)}
+            onDragEnd={onDragEnd}
+          />
+        </td>
+      ) : null}
       <td>
         <button type="button" className="link project-name" onClick={() => onOpen(row.id)}>{row.name}</button>
       </td>
@@ -217,6 +349,12 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [viewFormError, setViewFormError] = useState('');
+  const [sections, setSections] = useState([]);
+  const [sectionForm, setSectionForm] = useState(emptySection);
+  const [showSectionForm, setShowSectionForm] = useState(false);
+  const [sectionFormError, setSectionFormError] = useState('');
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropKey, setDropKey] = useState(null);
   const [loading, setLoading] = useState(true);
   const [usersProject, setUsersProject] = useState(null);
   const [person, setPerson] = useState(null);
@@ -225,9 +363,12 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
   const closingRef = useRef(false);
   const viewDialogRef = useRef(null);
   const viewClosingRef = useRef(false);
+  const sectionDialogRef = useRef(null);
+  const sectionClosingRef = useRef(false);
   const seenFilters = useRef({ q: '', group: undefined, resourceId: undefined });
   const openGroupId = group && /^\d+$/.test(group) ? Number(group) : null;
   const openGroup = groups.find((item) => item.id === openGroupId) || null;
+  const allMode = !resourceId && !group;
 
   function labelFor(code) {
     return lifecycle.find((item) => item.code === code)?.label || code;
@@ -323,6 +464,40 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
     }
   }, [showViewForm]);
 
+  useEffect(() => {
+    if (!openGroupId && !allMode) {
+      setSections([]);
+      return undefined;
+    }
+    let active = true;
+    setSections([]);
+    const request = openGroupId ? listProjectSections(openGroupId) : listAllSections();
+    request
+      .then((next) => {
+        if (active) setSections(next);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSections([]);
+        setError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [openGroupId, allMode]);
+
+  useEffect(() => {
+    const dialog = sectionDialogRef.current;
+    if (!dialog) return;
+    if (showSectionForm && !dialog.open) {
+      dialog.showModal();
+    } else if (!showSectionForm && dialog.open) {
+      sectionClosingRef.current = true;
+      dialog.close();
+      sectionClosingRef.current = false;
+    }
+  }, [showSectionForm]);
+
   function closeProjectForm() {
     setShowForm(false);
     setForm(emptyForm);
@@ -359,6 +534,114 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
   function openEditView() {
     if (!openGroup) return;
     onEditView(openGroup.id);
+  }
+
+  function closeSectionForm() {
+    setShowSectionForm(false);
+    setSectionForm(emptySection);
+    setSectionFormError('');
+  }
+
+  function openSectionForm(section = null) {
+    setSectionForm({ name: section?.name || '', id: section?.id || null });
+    setSectionFormError('');
+    setShowSectionForm(true);
+  }
+
+  function onSectionDialogCancel(event) {
+    event.preventDefault();
+    closeSectionForm();
+  }
+
+  function onSectionDialogClose() {
+    if (sectionClosingRef.current) return;
+    closeSectionForm();
+  }
+
+  async function onSaveSection(event) {
+    event.preventDefault();
+    if (!openGroupId && !allMode) return;
+    setSectionFormError('');
+    try {
+      if (sectionForm.id) {
+        const updated = openGroupId
+          ? await updateProjectSection(openGroupId, sectionForm.id, { name: sectionForm.name })
+          : await updateAllSection(sectionForm.id, { name: sectionForm.name });
+        setSections((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        setRows((current) => current.map((row) => (
+          placedSectionId(row, openGroupId) === updated.id ? withPlacement(row, openGroupId, updated) : row
+        )));
+      } else {
+        const created = openGroupId
+          ? await createProjectSection(openGroupId, { name: sectionForm.name })
+          : await createAllSection({ name: sectionForm.name });
+        setSections((current) => [...current, created]);
+      }
+      closeSectionForm();
+    } catch (err) {
+      setSectionFormError(err.message);
+    }
+  }
+
+  async function onDeleteSection(section) {
+    if (!openGroupId && !allMode) return;
+    const kept = openGroupId ? 'this view' : 'this list';
+    if (!window.confirm(`Delete the ${section.name} section? Projects in it stay in ${kept}.`)) return;
+    setError('');
+    try {
+      if (openGroupId) await deleteProjectSection(openGroupId, section.id);
+      else await deleteAllSection(section.id);
+      setSections((current) => current.filter((item) => item.id !== section.id));
+      setRows((current) => current.map((row) => (
+        placedSectionId(row, openGroupId) === section.id ? withPlacement(row, openGroupId, null) : row
+      )));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function onDragStartProject(event, projectId) {
+    event.dataTransfer.setData('text/plain', String(projectId));
+    event.dataTransfer.effectAllowed = 'move';
+    setDraggingId(projectId);
+  }
+
+  function onDragEndProject() {
+    setDraggingId(null);
+    setDropKey(null);
+  }
+
+  function onDragOverSection(event, key) {
+    if (draggingId == null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropKey((current) => (current === key ? current : key));
+  }
+
+  async function onDropProject(event, sectionId) {
+    event.preventDefault();
+    const projectId = draggingId;
+    setDropKey(null);
+    setDraggingId(null);
+    if ((!openGroupId && !allMode) || projectId == null) return;
+    const row = rows.find((item) => item.id === projectId);
+    if (!row) return;
+    const knownIds = new Set(sections.map((item) => item.id));
+    const currentId = placedSectionId(row, openGroupId, knownIds);
+    if (currentId === sectionId) return;
+    const section = sectionId == null ? null : sections.find((item) => item.id === sectionId) || null;
+    if (sectionId != null && !section) return;
+    const previous = rows;
+    setRows((current) => current.map((item) => (
+      item.id === projectId ? withPlacement(item, openGroupId, section) : item
+    )));
+    try {
+      if (openGroupId) await setProjectSection(projectId, openGroupId, sectionId);
+      else await setAllSection(projectId, sectionId);
+    } catch (err) {
+      setRows(previous);
+      setError(err.message);
+    }
   }
 
   function onViewDialogCancel(event) {
@@ -479,6 +762,38 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
           ? 'Every project is in a view.'
           : 'No projects yet.';
 
+  const grouped = Boolean((openGroupId || allMode) && sections.length > 0);
+  const canArrange = Boolean(canEdit && grouped && !appliedQ);
+  const knownSectionIds = new Set(sections.map((item) => item.id));
+  const looseRows = grouped
+    ? rows.filter((row) => placedSectionId(row, openGroupId, knownSectionIds) == null)
+    : [];
+  const visibleSections = grouped
+    ? sections.filter((section) => (
+      !appliedQ || rows.some((row) => placedSectionId(row, openGroupId, knownSectionIds) === section.id)
+    ))
+    : [];
+  const showLoose = grouped && (!appliedQ || looseRows.length > 0);
+  const columnCount = 6 + (canEdit ? 1 : 0) + (canArrange ? 1 : 0);
+  const showEmpty = !loading && rows.length === 0 && (!grouped || Boolean(appliedQ));
+
+  function renderProject(row) {
+    return (
+      <ProjectRow
+        key={row.id}
+        row={row}
+        canEdit={canEdit}
+        canArrange={canArrange}
+        labelFor={labelFor}
+        onOpen={onOpenProject}
+        onOpenUsers={openUsers}
+        onArchive={onArchive}
+        onDragStart={onDragStartProject}
+        onDragEnd={onDragEndProject}
+      />
+    );
+  }
+
   return (
     <>
       <header className="main-header">
@@ -493,10 +808,17 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
         </div>
         {canEdit ? (
           <div className="header-actions">
-            {openGroup ? (
-              <button type="button" className="btn btn--secondary" onClick={openEditView}>
-                Edit view
-              </button>
+            {openGroup || allMode ? (
+              <>
+                <button type="button" className="btn btn--secondary" onClick={() => openSectionForm()}>
+                  New section
+                </button>
+                {openGroup ? (
+                  <button type="button" className="btn btn--secondary" onClick={openEditView}>
+                    Edit view
+                  </button>
+                ) : null}
+              </>
             ) : null}
             <button type="button" className="btn btn--secondary" onClick={openViewForm}>
               New view
@@ -573,6 +895,32 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
           </form>
         </dialog>
         <dialog
+          ref={sectionDialogRef}
+          className="dialog"
+          aria-labelledby="section-dialog-title"
+          onCancel={onSectionDialogCancel}
+          onClose={onSectionDialogClose}
+        >
+          <form className="form-grid dialog-fields" onSubmit={onSaveSection}>
+            <h2 id="section-dialog-title" className="dialog-heading">
+              {sectionForm.id ? 'Rename section' : 'New section'}
+            </h2>
+            {sectionFormError ? <p className="banner" role="alert">{sectionFormError}</p> : null}
+            <label className="field-wide">
+              Section name
+              <input
+                value={sectionForm.name}
+                onChange={(event) => setSectionForm((current) => ({ ...current, name: event.target.value }))}
+                required
+              />
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="btn btn--primary">{sectionForm.id ? 'Save' : 'Create section'}</button>
+              <button type="button" className="btn btn--ghost" onClick={closeSectionForm}>Cancel</button>
+            </div>
+          </form>
+        </dialog>
+        <dialog
           ref={dialogRef}
           className="dialog dialog--project"
           aria-labelledby="project-dialog-title"
@@ -644,12 +992,13 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
         </dialog>
         </>
       ) : null}
-      {loading ? <p className="muted">Loading…</p> : rows.length === 0 ? (
+      {loading ? <p className="muted">Loading…</p> : showEmpty ? (
         <p className="empty">{emptyLabel}</p>
       ) : (
         <table className="data">
           <thead>
             <tr>
+              {canArrange ? <th className="drag-col"><span className="sr-only">Move</span></th> : null}
               <th>Name</th>
               <th>Description</th>
               <th>Views</th>
@@ -660,17 +1009,36 @@ export default function ProjectsPage({ canEdit, group, groups, resourceId, onSel
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <ProjectRow
-                key={row.id}
-                row={row}
-                canEdit={canEdit}
-                labelFor={labelFor}
-                onOpen={onOpenProject}
-                onOpenUsers={openUsers}
-                onArchive={onArchive}
-              />
-            ))}
+            {grouped ? (
+              <>
+                {visibleSections.map((section) => (
+                  <SectionGroup
+                    key={section.id}
+                    section={section}
+                    rows={rows.filter((row) => placedSectionId(row, openGroupId, knownSectionIds) === section.id)}
+                    columnCount={columnCount}
+                    canEdit={canEdit}
+                    dropOver={dropKey === section.id}
+                    onDragOver={(event) => onDragOverSection(event, section.id)}
+                    onDrop={(event) => onDropProject(event, section.id)}
+                    onRename={() => openSectionForm(section)}
+                    onDelete={() => onDeleteSection(section)}
+                    renderProject={renderProject}
+                  />
+                ))}
+                {showLoose ? (
+                  <SectionGroup
+                    title="No section"
+                    rows={looseRows}
+                    columnCount={columnCount}
+                    dropOver={dropKey === 'none'}
+                    onDragOver={(event) => onDragOverSection(event, 'none')}
+                    onDrop={(event) => onDropProject(event, null)}
+                    renderProject={renderProject}
+                  />
+                ) : null}
+              </>
+            ) : rows.map((row) => renderProject(row))}
           </tbody>
         </table>
       )}

@@ -18,10 +18,11 @@ export function CompanyMark({ name, icon, decorative = false }) {
   );
 }
 
-export default function CompanyLabel({ name, icon, iconOnly = false }) {
+export default function CompanyLabel({ name, icon, email, iconOnly = false }) {
+  const title = email ? `${name} — ${email}` : name;
   if (iconOnly) {
     return (
-      <span className="company-label company-label--icon" title={name}>
+      <span className="company-label company-label--icon" title={title}>
         <CompanyMark name={name} icon={icon} />
       </span>
     );

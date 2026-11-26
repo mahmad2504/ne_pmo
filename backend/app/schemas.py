@@ -156,11 +156,68 @@ class CompanyRef(APIModel):
     name: str
     description: str | None = None
     icon: str | None = None
+    email: str | None = None
 
 
 class AssignmentCompany(APIModel):
     name: str
     icon: str | None = None
+    email: str | None = None
+
+
+class CompanyLinkIn(APIModel):
+    id: int
+    email: EmailStr | None = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def id_clean(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("Invalid company")
+        if isinstance(value, str):
+            text = value.strip()
+            if not text.isdigit():
+                raise ValueError("Invalid company")
+            return int(text)
+        if not isinstance(value, int):
+            raise ValueError("Invalid company")
+        return value
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def email_clean(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip().lower()
+            return text or None
+        return value
+
+
+def _prepare_company_links(value):
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("Companies must be a list")
+    prepared = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, dict):
+            raise ValueError("Invalid company")
+        prepared.append(item)
+    return prepared
+
+
+def _unique_company_links(value):
+    if value is None:
+        return None
+    seen: set[int] = set()
+    unique = []
+    for item in value:
+        if item.id in seen:
+            continue
+        seen.add(item.id)
+        unique.append(item)
+    return unique
 
 
 def _clean_company_ids(value):
@@ -197,6 +254,7 @@ class ResourceWrite(APIModel):
     location: str | None = None
     designation_id: int | None = None
     company_ids: list[int] = Field(default_factory=list)
+    companies: list[CompanyLinkIn] | None = None
     resigned: bool = False
 
     @field_validator("name", mode="before")
@@ -236,6 +294,16 @@ class ResourceWrite(APIModel):
         cleaned = _clean_company_ids([] if value is None else value)
         return [] if cleaned is None else cleaned
 
+    @field_validator("companies", mode="before")
+    @classmethod
+    def companies_prepare(cls, value):
+        return _prepare_company_links(value)
+
+    @field_validator("companies")
+    @classmethod
+    def companies_unique(cls, value):
+        return _unique_company_links(value)
+
     @field_validator("location")
     @classmethod
     def location_code(cls, value: str | None):
@@ -251,6 +319,7 @@ class ResourcePatch(APIModel):
     location: str | None = None
     designation_id: int | None = None
     company_ids: list[int] | None = None
+    companies: list[CompanyLinkIn] | None = None
     resigned: bool | None = None
 
     @field_validator("name", mode="before")
@@ -294,6 +363,16 @@ class ResourcePatch(APIModel):
         if value is None:
             return None
         return _clean_company_ids(value)
+
+    @field_validator("companies", mode="before")
+    @classmethod
+    def companies_prepare(cls, value):
+        return _prepare_company_links(value)
+
+    @field_validator("companies")
+    @classmethod
+    def companies_unique(cls, value):
+        return _unique_company_links(value)
 
     @model_validator(mode="after")
     def reject_null_required(self):
@@ -359,9 +438,50 @@ class ProjectGroupOut(APIModel):
     project_count: int
 
 
+class ProjectGroupSectionCreate(APIModel):
+    name: str
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def name_clean(cls, value):
+        return _clean_name(value, required=True)
+
+
+class ProjectGroupSectionPatch(APIModel):
+    name: str | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def name_clean(cls, value):
+        if value is None:
+            return None
+        return _clean_name(value, required=True)
+
+    @model_validator(mode="after")
+    def reject_blank_name(self):
+        if "name" in self.model_fields_set and not self.name:
+            raise ValueError("Name is required")
+        return self
+
+
+class ProjectGroupSectionOut(APIModel):
+    id: int
+    group_id: int
+    name: str
+    position: int
+
+
+class ProjectSectionOut(APIModel):
+    id: int
+    name: str
+    position: int
+
+
 class ProjectGroupRef(APIModel):
     id: int
     name: str
+    section_id: int | None = None
+    section_name: str | None = None
 
 
 class ProjectGroupsWrite(APIModel):
@@ -377,6 +497,19 @@ class ProjectGroupsWrite(APIModel):
 class ProjectGroupMove(APIModel):
     from_group_id: int
     to_group_id: int
+
+
+class ProjectSectionWrite(APIModel):
+    section_id: int | None = None
+
+    @field_validator("section_id", mode="before")
+    @classmethod
+    def section_id_clean(cls, value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("Invalid section")
+        return value
 
 
 def _clean_symbol(value: str | None, *, required: bool) -> str | None:
@@ -664,6 +797,8 @@ class ProjectListItem(APIModel):
     status_report_count: int
     latest_report_at: UtcOpt = None
     groups: list[ProjectGroupRef]
+    section_id: int | None = None
+    section_name: str | None = None
     created_at: Utc
     updated_at: Utc
 

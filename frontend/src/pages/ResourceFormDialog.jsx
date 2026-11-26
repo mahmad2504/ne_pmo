@@ -8,7 +8,7 @@ const emptyForm = {
   department_id: '',
   designation_id: '',
   location: '',
-  company_ids: [],
+  companies: [],
   resigned: false,
 };
 
@@ -25,7 +25,10 @@ function formFromPerson(person, departments) {
     department_id: String(person.department.id),
     designation_id: person.designation ? String(person.designation.id) : '',
     location: person.location || '',
-    company_ids: person.companies.map((company) => company.id),
+    companies: person.companies.map((company) => ({
+      id: company.id,
+      email: company.email || '',
+    })),
     resigned: Boolean(person.resigned),
   };
 }
@@ -59,7 +62,10 @@ export default function ResourceFormDialog({ person, departments, titles, compan
       department_id: Number(form.department_id),
       designation_id: form.designation_id ? Number(form.designation_id) : null,
       location: form.location || null,
-      company_ids: form.company_ids,
+      companies: form.companies.map((company) => ({
+        id: company.id,
+        email: company.email.trim() ? company.email.trim() : null,
+      })),
       resigned: form.resigned,
     };
     try {
@@ -131,27 +137,51 @@ export default function ResourceFormDialog({ person, departments, titles, compan
           {companies.length === 0 ? (
             <span className="muted">No companies yet.</span>
           ) : (
-            <div className="check-list">
-              {companies.map((company) => (
-                <label key={company.id}>
-                  <input
-                    type="checkbox"
-                    checked={form.company_ids.includes(company.id)}
-                    onChange={() => {
-                      setForm((current) => {
-                        const selected = current.company_ids.includes(company.id);
-                        return {
-                          ...current,
-                          company_ids: selected
-                            ? current.company_ids.filter((id) => id !== company.id)
-                            : [...current.company_ids, company.id],
-                        };
-                      });
-                    }}
-                  />
-                  <CompanyLabel name={company.name} icon={company.icon} />
-                </label>
-              ))}
+            <div className="check-list check-list--stack">
+              {companies.map((company) => {
+                const selected = form.companies.find((row) => row.id === company.id);
+                return (
+                  <div key={company.id} className="company-onboard">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selected)}
+                        onChange={() => {
+                          setForm((current) => {
+                            const already = current.companies.some((row) => row.id === company.id);
+                            return {
+                              ...current,
+                              companies: already
+                                ? current.companies.filter((row) => row.id !== company.id)
+                                : [...current.companies, { id: company.id, email: '' }],
+                            };
+                          });
+                        }}
+                      />
+                      <CompanyLabel name={company.name} icon={company.icon} />
+                    </label>
+                    {selected ? (
+                      <input
+                        className="company-onboard__email"
+                        type="email"
+                        value={selected.email}
+                        placeholder={`Email at ${company.name}`}
+                        aria-label={`Email at ${company.name}`}
+                        autoComplete="off"
+                        onChange={(event) => {
+                          const email = event.target.value;
+                          setForm((current) => ({
+                            ...current,
+                            companies: current.companies.map((row) => (
+                              row.id === company.id ? { ...row, email } : row
+                            )),
+                          }));
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           )}
         </fieldset>

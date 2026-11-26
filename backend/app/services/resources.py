@@ -42,11 +42,14 @@ def _require_designation(db: Session, designation_id: int | None) -> Designation
     return row
 
 
-def _replace_companies(db: Session, row: Resource, company_ids: list[int]) -> None:
-    wanted: list[int] = []
-    for company_id in company_ids:
-        if company_id not in wanted:
-            wanted.append(company_id)
+def _replace_companies(
+    db: Session,
+    row: Resource,
+    emails_by_company: dict[int, str | None],
+    *,
+    preserve_email: bool,
+) -> None:
+    wanted = list(emails_by_company)
     found: dict[int, Company] = {}
     if wanted:
         companies = db.scalars(select(Company).where(Company.id.in_(wanted))).all()
@@ -57,24 +60,45 @@ def _replace_companies(db: Session, row: Resource, company_ids: list[int]) -> No
     for company_id, link in current.items():
         if company_id not in found:
             row.company_links.remove(link)
+        elif not preserve_email:
+            link.email = emails_by_company[company_id]
     for company_id in wanted:
         if company_id not in current:
-            row.company_links.append(ResourceCompany(company=found[company_id]))
+            row.company_links.append(
+                ResourceCompany(
+                    company=found[company_id],
+                    email=None if preserve_email else emails_by_company[company_id],
+                )
+            )
+
+
+def _requested_companies(body: ResourceWrite | ResourcePatch) -> tuple[dict[int, str | None], bool] | None:
+    fields = body.model_fields_set
+    if "companies" in fields:
+        emails: dict[int, str | None] = {}
+        for item in body.companies or []:
+            if item.id not in emails:
+                emails[item.id] = None if item.email is None else str(item.email)
+        return emails, False
+    if "company_ids" in fields:
+        return {company_id: None for company_id in (body.company_ids or [])}, True
+    return None
 
 
 def _company_payloads(row: Resource) -> list[dict]:
-    companies = sorted(
-        (link.company for link in row.company_links),
-        key=lambda company: (company.name.lower(), company.id),
+    links = sorted(
+        row.company_links,
+        key=lambda link: (link.company.name.lower(), link.company.id),
     )
     return [
         {
-            "id": company.id,
-            "name": company.name,
-            "description": company.description,
-            "icon": company.icon,
+            "id": link.company.id,
+            "name": link.company.name,
+            "description": link.company.description,
+            "icon": link.company.icon,
+            "email": link.email,
         }
-        for company in companies
+        for link in links
     ]
 
 
@@ -136,10 +160,14 @@ def list_resources(
         stmt = stmt.where(Resource.resigned.is_(False))
     needle = (q or "").strip().lower()
     if needle:
+        company_email_ids = select(ResourceCompany.resource_id).where(
+            func.lower(ResourceCompany.email).contains(needle)
+        )
         stmt = stmt.where(
             or_(
                 func.lower(Resource.name).contains(needle),
                 func.lower(Resource.email).contains(needle),
+                Resource.id.in_(company_email_ids),
             )
         )
     if department_id is not None:
@@ -189,7 +217,10 @@ def create_resource(db: Session, body: ResourceWrite) -> dict:
         updated_at=now,
     )
     db.add(row)
-    _replace_companies(db, row, body.company_ids)
+    requested = _requested_companies(body)
+    if requested is not None:
+        emails, preserve_email = requested
+        _replace_companies(db, row, emails, preserve_email=preserve_email)
     try:
         with db.begin_nested():
             db.flush()
@@ -216,8 +247,10 @@ def patch_resource(db: Session, resource_id: int, body: ResourcePatch) -> dict:
         row.location = body.location
     if "resigned" in fields and body.resigned is not None:
         row.resigned = body.resigned
-    if "company_ids" in fields:
-        _replace_companies(db, row, body.company_ids or [])
+    requested = _requested_companies(body)
+    if requested is not None:
+        emails, preserve_email = requested
+        _replace_companies(db, row, emails, preserve_email=preserve_email)
     row.updated_at = utcnow()
     try:
         with db.begin_nested():

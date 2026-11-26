@@ -823,7 +823,7 @@ export default function ProjectPage({ projectId, canEdit, onClose, onOpenProject
                 </td>
                 <td>{row.department_name}</td>
                 <td className="companies-cell">{row.companies.length ? row.companies.map((company) => (
-                  <CompanyLabel key={company.name} name={company.name} icon={company.icon} iconOnly />
+                  <CompanyLabel key={company.name} name={company.name} icon={company.icon} email={company.email} iconOnly />
                 )) : <span className="muted">—</span>}</td>
                 <td>
                   {row.project_count === 0 ? <span className="muted">—</span> : (

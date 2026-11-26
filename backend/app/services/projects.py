@@ -8,7 +8,9 @@ from app.models import (
     ProjectContribution,
     ProjectGroup,
     ProjectGroupMember,
+    ProjectGroupSection,
     ProjectResource,
+    ProjectSection,
     ProjectStatusReport,
     ProjectTag,
     Resource,
@@ -45,11 +47,14 @@ def _person_options():
 
 
 def _companies(person: Resource) -> list[dict]:
-    companies = sorted(
-        (link.company for link in person.company_links),
-        key=lambda company: (company.name.lower(), company.id),
+    links = sorted(
+        person.company_links,
+        key=lambda link: (link.company.name.lower(), link.company.id),
     )
-    return [{"name": company.name, "icon": company.icon} for company in companies]
+    return [
+        {"name": link.company.name, "icon": link.company.icon, "email": link.email}
+        for link in links
+    ]
 
 
 def _person_fields(person: Resource) -> dict:
@@ -113,13 +118,27 @@ def _group_map(db: Session, project_ids: list[int]) -> dict[int, list[dict]]:
     if not project_ids:
         return result
     rows = db.execute(
-        select(ProjectGroupMember.project_id, ProjectGroup.id, ProjectGroup.name)
+        select(
+            ProjectGroupMember.project_id,
+            ProjectGroup.id,
+            ProjectGroup.name,
+            ProjectGroupMember.section_id,
+            ProjectGroupSection.name,
+        )
         .join(ProjectGroup, ProjectGroup.id == ProjectGroupMember.group_id)
+        .outerjoin(ProjectGroupSection, ProjectGroupSection.id == ProjectGroupMember.section_id)
         .where(ProjectGroupMember.project_id.in_(project_ids))
         .order_by(ProjectGroup.position, func.lower(ProjectGroup.name), ProjectGroup.id)
     ).all()
-    for project_id, group_id, name in rows:
-        result[project_id].append({"id": group_id, "name": name})
+    for project_id, group_id, name, section_id, section_name in rows:
+        result[project_id].append(
+            {
+                "id": group_id,
+                "name": name,
+                "section_id": section_id,
+                "section_name": section_name,
+            }
+        )
     return result
 
 
@@ -274,9 +293,27 @@ def _payload(
         "assignments": assignments,
         "contributions": contributions,
         "groups": groups,
+        "section_id": row.section_id,
+        "section_name": _section_name(db, row.section_id),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+
+
+def _section_name(db: Session, section_id: int | None) -> str | None:
+    if section_id is None:
+        return None
+    return db.scalar(select(ProjectSection.name).where(ProjectSection.id == section_id))
+
+
+def _section_names(db: Session, rows: list[Project]) -> dict[int, str]:
+    ids = {row.section_id for row in rows if row.section_id is not None}
+    if not ids:
+        return {}
+    found = db.execute(
+        select(ProjectSection.id, ProjectSection.name).where(ProjectSection.id.in_(ids))
+    ).all()
+    return {section_id: name for section_id, name in found}
 
 
 def _list_payload(
@@ -285,6 +322,7 @@ def _list_payload(
     tags: list[dict],
     stats: dict,
     assignment_count: int,
+    section_name: str | None = None,
 ) -> dict:
     return {
         "id": row.id,
@@ -301,6 +339,8 @@ def _list_payload(
         "status_report_count": stats["status_report_count"],
         "latest_report_at": stats["latest_report_at"],
         "groups": groups,
+        "section_id": row.section_id,
+        "section_name": section_name if row.section_id is not None else None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -312,6 +352,7 @@ def _list_payloads(db: Session, rows: list[Project]) -> list[dict]:
     tagged = _tag_map(db, ids)
     stats = _report_stats(db, ids)
     counts = _assignment_counts(db, ids)
+    names = _section_names(db, rows)
     empty_stats = {"status_report_count": 0, "latest_report_at": None}
     return [
         _list_payload(
@@ -320,6 +361,7 @@ def _list_payloads(db: Session, rows: list[Project]) -> list[dict]:
             tagged.get(row.id, []),
             stats.get(row.id, empty_stats),
             counts.get(row.id, 0),
+            names.get(row.section_id) if row.section_id is not None else None,
         )
         for row in rows
     ]
@@ -447,6 +489,31 @@ def unarchive_project(db: Session, project_id: int) -> dict:
 def set_project_groups(db: Session, project_id: int, group_ids: list[int]) -> dict:
     project = _require_project(db, project_id)
     _replace_groups(db, project.id, group_ids)
+    return _payload(db, project)
+
+
+def set_project_all_section(db: Session, project_id: int, section_id: int | None) -> dict:
+    project = _require_project(db, project_id)
+    if section_id is not None and db.get(ProjectSection, section_id) is None:
+        raise AppError(404, "Section not found")
+    project.section_id = section_id
+    db.flush()
+    return _payload(db, project)
+
+
+def set_project_section(db: Session, project_id: int, group_id: int, section_id: int | None) -> dict:
+    project = _require_project(db, project_id)
+    if db.get(ProjectGroup, group_id) is None:
+        raise AppError(404, "View not found")
+    member = db.get(ProjectGroupMember, (project_id, group_id))
+    if member is None:
+        raise AppError(404, "That project is not in this view")
+    if section_id is not None:
+        section = db.get(ProjectGroupSection, section_id)
+        if section is None or section.group_id != group_id:
+            raise AppError(404, "Section not found")
+    member.section_id = section_id
+    db.flush()
     return _payload(db, project)
 
 

@@ -77,6 +77,7 @@ class ResourceCompany(Base):
     company_id: Mapped[int] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True
     )
+    email: Mapped[str | None] = mapped_column(String(255))
 
     resource: Mapped[Resource] = relationship(back_populates="company_links")
     company: Mapped[Company] = relationship(back_populates="resource_links")
@@ -93,6 +94,9 @@ class Project(Base):
     reports_with_pmo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     report_cadence_days: Mapped[int | None] = mapped_column(Integer)
     external_url: Mapped[str | None] = mapped_column(String(2048))
+    section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_sections.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -111,6 +115,17 @@ class Project(Base):
     tag_links: Mapped[list["ProjectTag"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    section: Mapped["ProjectSection | None"] = relationship(back_populates="projects")
+
+
+class ProjectSection(Base):
+    __tablename__ = "project_sections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    projects: Mapped[list[Project]] = relationship(back_populates="section")
 
 
 class ProjectGroup(Base):
@@ -124,6 +139,23 @@ class ProjectGroup(Base):
     memberships: Mapped[list["ProjectGroupMember"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
+    sections: Mapped[list["ProjectGroupSection"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+
+
+class ProjectGroupSection(Base):
+    __tablename__ = "project_group_sections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("project_groups.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    group: Mapped[ProjectGroup] = relationship(back_populates="sections")
+    memberships: Mapped[list["ProjectGroupMember"]] = relationship(back_populates="section")
 
 
 class ProjectGroupMember(Base):
@@ -135,9 +167,13 @@ class ProjectGroupMember(Base):
     group_id: Mapped[int] = mapped_column(
         ForeignKey("project_groups.id", ondelete="CASCADE"), primary_key=True
     )
+    section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_group_sections.id", ondelete="SET NULL"), index=True
+    )
 
     project: Mapped[Project] = relationship(back_populates="group_links")
     group: Mapped[ProjectGroup] = relationship(back_populates="memberships")
+    section: Mapped[ProjectGroupSection | None] = relationship(back_populates="memberships")
 
 
 class ProjectResource(Base):
@@ -223,4 +259,11 @@ Index("uq_designations_name_ci", func.lower(Designation.name), unique=True)
 Index("uq_companies_name_ci", func.lower(Company.name), unique=True)
 Index("uq_resources_email_ci", func.lower(Resource.email), unique=True)
 Index("uq_project_groups_name_ci", func.lower(ProjectGroup.name), unique=True)
+Index(
+    "uq_project_group_sections_name_ci",
+    ProjectGroupSection.group_id,
+    func.lower(ProjectGroupSection.name),
+    unique=True,
+)
+Index("uq_project_sections_name_ci", func.lower(ProjectSection.name), unique=True)
 Index("uq_tags_name_ci", func.lower(Tag.name), unique=True)

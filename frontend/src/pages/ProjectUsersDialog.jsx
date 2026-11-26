@@ -88,7 +88,7 @@ export default function ProjectUsersDialog({ project, canEdit, onClose, onUpdate
                         {row.name}
                         {row.resigned ? <span className="flag">Resigned</span> : null}
                         {(row.companies ?? []).map((company) => (
-                          <CompanyLabel key={company.name} name={company.name} icon={company.icon} iconOnly />
+                          <CompanyLabel key={company.name} name={company.name} icon={company.icon} email={company.email} iconOnly />
                         ))}
                       </span>
                       <span className="user-meta">

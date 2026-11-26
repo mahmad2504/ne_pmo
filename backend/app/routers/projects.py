@@ -11,6 +11,7 @@ from app.schemas import (
     MoveAssignment,
     ProjectGroupMove,
     ProjectGroupsWrite,
+    ProjectSectionWrite,
     ProjectListItem,
     ProjectOut,
     ProjectPatch,
@@ -211,3 +212,30 @@ def set_groups(project_id: int, body: ProjectGroupsWrite, db: Session = Depends(
 )
 def move_group(project_id: int, body: ProjectGroupMove, db: Session = Depends(get_db, scope="function")):
     return service.move_project_group(db, project_id, body.from_group_id, body.to_group_id)
+
+
+@router.patch(
+    "/{project_id}/groups/{group_id}",
+    response_model=ProjectOut,
+    dependencies=[Depends(require_admin)],
+)
+def set_section(
+    project_id: int,
+    group_id: int,
+    body: ProjectSectionWrite,
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.set_project_section(db, project_id, group_id, body.section_id)
+
+
+@router.patch(
+    "/{project_id}/section",
+    response_model=ProjectOut,
+    dependencies=[Depends(require_admin)],
+)
+def set_all_section(
+    project_id: int,
+    body: ProjectSectionWrite,
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.set_project_all_section(db, project_id, body.section_id)

@@ -91,11 +91,27 @@ export const unarchiveProject = (id) => api(`/api/projects/${id}/unarchive`, { m
 export const deleteProject = (id) => api(`/api/projects/${id}`, { method: 'DELETE' });
 export const setProjectGroups = (id, groupIds) => api(`/api/projects/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) });
 export const moveProjectGroup = (id, body) => api(`/api/projects/${id}/groups/move`, { method: 'POST', body: JSON.stringify(body) });
+export const setProjectSection = (projectId, groupId, sectionId) => api(
+  `/api/projects/${projectId}/groups/${groupId}`,
+  { method: 'PATCH', body: JSON.stringify({ section_id: sectionId }) },
+);
 
 export const listProjectGroups = () => api('/api/project-groups');
 export const createProjectGroup = (body) => api('/api/project-groups', { method: 'POST', body: JSON.stringify(body) });
 export const updateProjectGroup = (id, body) => api(`/api/project-groups/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 export const deleteProjectGroup = (id) => api(`/api/project-groups/${id}`, { method: 'DELETE' });
+export const listProjectSections = (groupId) => api(`/api/project-groups/${groupId}/sections`);
+export const createProjectSection = (groupId, body) => api(`/api/project-groups/${groupId}/sections`, { method: 'POST', body: JSON.stringify(body) });
+export const updateProjectSection = (groupId, sectionId, body) => api(`/api/project-groups/${groupId}/sections/${sectionId}`, { method: 'PATCH', body: JSON.stringify(body) });
+export const deleteProjectSection = (groupId, sectionId) => api(`/api/project-groups/${groupId}/sections/${sectionId}`, { method: 'DELETE' });
+export const listAllSections = () => api('/api/project-sections');
+export const createAllSection = (body) => api('/api/project-sections', { method: 'POST', body: JSON.stringify(body) });
+export const updateAllSection = (id, body) => api(`/api/project-sections/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+export const deleteAllSection = (id) => api(`/api/project-sections/${id}`, { method: 'DELETE' });
+export const setAllSection = (projectId, sectionId) => api(
+  `/api/projects/${projectId}/section`,
+  { method: 'PATCH', body: JSON.stringify({ section_id: sectionId }) },
+);
 export const assignResource = (projectId, body) => api(`/api/projects/${projectId}/resources`, { method: 'POST', body: JSON.stringify(body) });
 export const updateAssignment = (projectId, resourceId, body) => api(`/api/projects/${projectId}/resources/${resourceId}`, { method: 'PATCH', body: JSON.stringify(body) });
 export const removeAssignment = (projectId, resourceId) => api(`/api/projects/${projectId}/resources/${resourceId}`, { method: 'DELETE' });

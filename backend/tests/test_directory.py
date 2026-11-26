@@ -143,7 +143,80 @@ def test_person_can_be_onboarded_with_several_companies(client):
     project = create_project(client)
     assigned = client.post(f"/api/projects/{project['id']}/resources", json={"resource_id": again["id"]})
     assert assigned.status_code == 200
-    assert assigned.json()["assignments"][0]["companies"] == [{"name": "ARM", "icon": None}]
+    assert assigned.json()["assignments"][0]["companies"] == [{"name": "ARM", "icon": None, "email": None}]
+
+
+def test_company_email_is_optional_on_a_person(client):
+    department = create_department(client)
+    arm = create_company(client, name="ARM")
+    altera = create_company(client, name="Altera")
+    person = create_person(
+        client,
+        department_id=department["id"],
+        companies=[
+            {"id": arm["id"], "email": " Ada@ARM.com "},
+            {"id": altera["id"], "email": ""},
+            {"id": arm["id"], "email": "other@arm.com"},
+        ],
+    )
+    by_name = {company["name"]: company for company in person["companies"]}
+    assert by_name["ARM"]["email"] == "ada@arm.com"
+    assert by_name["Altera"]["email"] is None
+    assert person["email"] == "ada@example.com"
+
+    found = client.get("/api/resources", params={"q": "ada@arm.com"})
+    assert [row["id"] for row in found.json()] == [person["id"]]
+
+    same = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": arm["id"], "email": person["email"]}, {"id": altera["id"]}]},
+    )
+    assert same.status_code == 200
+    assert {row["name"]: row["email"] for row in same.json()["companies"]} == {
+        "ARM": "ada@example.com",
+        "Altera": None,
+    }
+
+    invalid = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": arm["id"], "email": "not-an-email"}]},
+    )
+    assert invalid.status_code == 422
+    still = client.get(f"/api/resources/{person['id']}").json()
+    assert {row["name"]: row["email"] for row in still["companies"]}["ARM"] == "ada@example.com"
+
+    blank = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": arm["id"], "email": "  "}, {"id": altera["id"], "email": None}]},
+    )
+    assert blank.status_code == 200
+    assert {row["email"] for row in blank.json()["companies"]} == {None}
+
+    restored = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": arm["id"], "email": "ada@arm.com"}, {"id": altera["id"], "email": "ada@altera.com"}]},
+    )
+    assert restored.status_code == 200
+
+    dropped = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": arm["id"], "email": "ada@arm.com"}]},
+    )
+    assert dropped.status_code == 200
+    assert [row["name"] for row in dropped.json()["companies"]] == ["ARM"]
+    assert dropped.json()["companies"][0]["email"] == "ada@arm.com"
+
+    kept = client.patch(f"/api/resources/{person['id']}", json={"company_ids": [arm["id"], altera["id"]]})
+    assert kept.status_code == 200
+    kept_email = {row["name"]: row["email"] for row in kept.json()["companies"]}
+    assert kept_email["ARM"] == "ada@arm.com"
+    assert kept_email["Altera"] is None
+
+    missing = client.patch(
+        f"/api/resources/{person['id']}",
+        json={"companies": [{"id": 9999, "email": "ghost@example.com"}]},
+    )
+    assert missing.status_code == 400
 
 
 def test_company_icon_is_optional_and_must_be_an_image(client):
